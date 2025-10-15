@@ -1,0 +1,769 @@
+"""
+Main window for the graph editor application.
+"""
+
+
+import wx
+import os
+from typing import Optional, List
+from utils.meta_graph_information import MetaGraphInformation
+from utils.display_settings import DisplaySettings
+from functools import partial
+
+# Handle imports for both module and direct execution
+import sys
+
+# Add the parent directory to the path for direct execution
+if __name__ == "__main__":
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Use absolute imports for better compatibility
+# event handlers
+# -graph canvas
+import event_handlers.control_points_and_composite_segments_panel_event_handler as m_control_points_and_composite_segments_panel_event_handler
+import event_handlers.graph_canvas_background_event_handler as m_graph_canvas_background_event_handler
+import event_handlers.graph_canvas_event_handler as m_graph_canvas_event_handler
+import event_handlers.graph_canvas_grid_event_handler as m_graph_canvas_grid_event_handler
+import event_handlers.graph_canvas_movement_event_handler as m_graph_canvas_movement_event_handler
+import event_handlers.graph_canvas_rotator_event_handler as m_graph_canvas_rotator_event_handler
+import event_handlers.graph_canvas_selector_event_handler as m_graph_canvas_selector_event_handler
+import event_handlers.graph_canvas_view_manager_event_handler as m_graph_canvas_view_manager_event_handler
+import event_handlers.graph_canvas_zoom_event_handler as m_graph_canvas_zoom_event_handler
+# -menubar
+import event_handlers.menubar_event_handler as m_menubar_event_handler
+# -sidebar
+import event_handlers.sidebar_event_handler as m_sidebar_event_handler
+# -status bar
+import event_handlers.status_bar_event_handler as m_status_bar_event_handler
+# -theme
+import event_handlers.theme_event_handler as m_theme_event_handler
+# -tool selector
+import event_handlers.tool_selector_event_handler as m_tool_selector_event_handler
+import event_handlers.toolbar_event_handler as m_toolbar_event_handler
+import event_handlers.undo_redo_event_handler as m_undo_redo_event_handler
+
+# file io 
+from file_io.dot_format import save_graph_to_dot, load_graph_from_dot
+
+# gui
+import gui.control_points_and_composite_segment_panel as m_control_points_and_composite_segment_panel
+import gui.dialogs as m_dialogs
+import gui.drawer as m_drawer
+import gui.graph_canvas as m_graph_canvas
+import gui.layouts as m_layouts
+import gui.menubar as m_menubar
+import gui.selector as m_selector
+import gui.sidebar as m_sidebar
+import gui.signal as m_signal
+import gui.status_bar as m_status_bar
+import gui.theme_dialog as m_theme_dialog
+import gui.tool_selector as m_tool_selector
+import gui.toolbar as m_toolbar
+
+# models
+import models.graph as m_graph
+import models.node as m_node
+import models.edge as m_edge
+
+# utils
+from utils.app_managers import AppManagers
+import utils.managers.theme_manager as m_theme_manager
+from utils.commands import ChangeColorCommand
+
+
+class MainWindow(wx.Frame):
+    """Main application window."""
+
+
+    def __init__(self):
+        super().__init__(None, title="Graph Editor", size=(1200, 800))
+
+        # Make the application fullscreen
+        self.Maximize(True)
+
+        # Application state
+        self.current_graph = m_graph.Graph()
+        self.graphs = {}  # Dictionary of graph_id -> Graph
+        self.graphs[self.current_graph.id] = self.current_graph
+        self.recent_files = []
+        
+        # Meta graph information (replaces individual fields)
+        self.meta_graph_information = MetaGraphInformation()
+
+        # Display settings container
+        self.display = DisplaySettings()
+        
+        # Initialize managers container
+        self.managers = AppManagers(self)
+
+        # Set up UI (this creates splitters)
+        self.setup_ui()
+        
+        # Update UI state
+        self.update_ui()
+
+
+    def setup_ui(self):
+        """Set up the main UI layout."""
+
+        # Create vertical splitter for main area and status bar
+        self.vertical_splitter = wx.SplitterWindow(self, style=wx.SP_3D | wx.SP_LIVE_UPDATE)
+        self.vertical_splitter.SetMinimumPaneSize(100)  # Minimum height for status bar
+        
+        # Create main panel
+        self.main_panel = wx.Panel(self.vertical_splitter)
+        self.main_panel.SetBackgroundColour(self.display.background_color)  # White background
+
+        # Create horizontal splitter for canvas and sidebar
+        self.horizontal_splitter = wx.SplitterWindow(self.main_panel, style=wx.SP_3D | wx.SP_LIVE_UPDATE)
+        self.horizontal_splitter.SetMinimumPaneSize(200)  # Minimum width for sidebar
+
+        # Create canvas
+        self.canvas = m_graph_canvas.GraphCanvas(self.horizontal_splitter, self.current_graph, self.managers.undo_redo_manager)
+
+        # Set up bidirectional reference for UI updates
+        self.canvas.main_window = self
+
+        # Initialize canvas restrictions
+        self.canvas.meta_graph_information = self.meta_graph_information
+        self.canvas.display = self.display
+
+        # Create sidebar
+        m_sidebar.setup_sidebar(self)
+
+        # Set up horizontal splitter
+        self.horizontal_splitter.SplitVertically(self.canvas, self.sidebar, -250)  # -250 means 250px from right
+        
+        # Create status panel
+        self.status_panel = wx.Panel(self.vertical_splitter)
+        self.status_panel.SetBackgroundColour(self.display.status_panel_background_color)
+        status_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.status_panel.SetSizer(status_sizer)
+
+        # Set up vertical splitter
+        self.vertical_splitter.SplitHorizontally(self.main_panel, self.status_panel, -150)  # -150 means 150px from bottom
+        
+        # Initialize panel visibility state
+        self.sidebar_visible = True
+        self.status_bar_visible = True
+        
+        # Bind splitter events for drag-to-collapse functionality
+        self.horizontal_splitter.Bind(wx.EVT_SPLITTER_SASH_POS_CHANGED, self.on_horizontal_splitter_changed)
+        self.vertical_splitter.Bind(wx.EVT_SPLITTER_SASH_POS_CHANGED, self.on_vertical_splitter_changed)
+        
+        # Main layout
+        main_sizer = wx.BoxSizer(wx.VERTICAL)
+        main_sizer.Add(self.horizontal_splitter, 1, wx.EXPAND)
+        self.main_panel.SetSizer(main_sizer)
+
+        # Create main layout
+        main_sizer = wx.BoxSizer(wx.VERTICAL)
+        main_sizer.Add(self.vertical_splitter, 1, wx.EXPAND)
+        self.SetSizer(main_sizer)
+
+        # Create menus and status bar
+        m_menubar.setup_menus(self)
+        m_status_bar.setup_status_bar(self)
+
+        # Bind events
+        self.Bind(wx.EVT_CLOSE, self.on_close)
+        self.Bind(wx.EVT_KEY_DOWN, self.on_key_down)
+
+        # Flag to suppress sidebar EVT_TEXT handlers during programmatic updates
+        self.suppress_view_option_events = False
+        
+        # Bind hotkey events to canvas
+        self.canvas.Bind(wx.EVT_KEY_DOWN, self.on_key_down)
+        self.canvas.Bind(wx.EVT_KEY_UP, lambda evt: self.managers.hotkey_manager.on_key_up(evt))
+        self.canvas.Bind(wx.EVT_LEFT_DOWN, lambda evt: self.managers.hotkey_manager.on_mouse_left_down(evt))
+        self.canvas.Bind(wx.EVT_RIGHT_DOWN, lambda evt: self.managers.hotkey_manager.on_mouse_right_down(evt))
+        self.canvas.Bind(wx.EVT_MIDDLE_DOWN, lambda evt: self.managers.hotkey_manager.on_mouse_middle_down(evt))
+        
+        # Removed extra mouse wheel binding to hotkey manager to avoid double-handling zoom events
+        self.canvas.Bind(wx.EVT_MOTION, lambda evt: self.managers.hotkey_manager.on_mouse_move(evt))
+
+
+    def toggle_sidebar(self):
+        """Toggle sidebar visibility."""
+
+        if self.sidebar_visible:
+            # Hide sidebar
+            self.sidebar.Hide()
+            self.horizontal_splitter.Unsplit(self.sidebar)
+            self.sidebar_visible = False
+            print("DEBUG: Sidebar hidden")
+            self.add_sidebar_expand_button()
+        else:
+            # Show sidebar
+            self.sidebar.Show()
+            self.horizontal_splitter.SplitVertically(self.canvas, self.sidebar, -250)
+            self.sidebar_visible = True
+            print("DEBUG: Sidebar shown")
+            self.remove_sidebar_expand_button()
+        
+        # Refresh the layout and force canvas redraw
+        self.horizontal_splitter.Refresh()
+        self.Layout()
+
+        # Force canvas to redraw with new dimensions and show additional visible area
+        # Use CallAfter to ensure layout is processed before refresh
+        wx.CallAfter(self.canvas.Refresh)
+        print("DEBUG: Canvas refresh scheduled after sidebar toggle")
+
+
+    def toggle_status_bar(self):
+        """Toggle status bar visibility."""
+
+        if self.status_bar_visible:
+            # Hide status bar
+            self.status_panel.Hide()
+            self.vertical_splitter.Unsplit(self.status_panel)
+            self.status_bar_visible = False
+            print("DEBUG: Status bar hidden")
+            self.add_status_bar_expand_button()
+        else:
+            # Show status bar
+            self.status_panel.Show()
+            self.vertical_splitter.SplitHorizontally(self.main_panel, self.status_panel, -150)
+            self.status_bar_visible = True
+            print("DEBUG: Status bar shown")
+            self.remove_status_bar_expand_button()
+        
+        # Refresh the layout and force canvas redraw
+        self.vertical_splitter.Refresh()
+        self.Layout()
+
+        # Force canvas to redraw with new dimensions and show additional visible area
+        # Use CallAfter to ensure layout is processed before refresh
+        wx.CallAfter(self.canvas.Refresh)
+        print("DEBUG: Canvas refresh scheduled after status bar toggle")
+
+
+    def on_horizontal_splitter_changed(self, event):
+        """Handle horizontal splitter (sidebar) position changes."""
+
+        sash_pos = event.GetSashPosition()
+        splitter_size = self.horizontal_splitter.GetSize().GetWidth()
+        
+        print(f"DEBUG: Horizontal splitter changed - sash_pos: {sash_pos}, splitter_size: {splitter_size}")
+        print(f"DEBUG: Collapse threshold: {splitter_size - 300}, Current position: {sash_pos}")
+        
+        # Only handle horizontal splitter if the sash position is reasonable for horizontal splitter
+        # (i.e., not a vertical splitter position that got misrouted)
+        if sash_pos < splitter_size:  # Valid horizontal splitter position
+            # If sash is dragged to the right edge (within 300 pixels), collapse sidebar
+            if sash_pos > splitter_size - 300:
+                if self.sidebar_visible:
+                    self.sidebar.Hide()
+                    self.horizontal_splitter.Unsplit(self.sidebar)
+                    self.sidebar_visible = False
+                    print("DEBUG: Sidebar collapsed via drag")
+                    self.update_menu_states()
+                    self.add_sidebar_expand_button()
+                    # Force canvas to redraw with new dimensions
+                    wx.CallAfter(self.canvas.Refresh)
+                    print("DEBUG: Canvas refresh scheduled after sidebar collapse via drag")
+            
+            # If sash is dragged away from the edge, ensure sidebar is visible
+            elif sash_pos < splitter_size - 400 and not self.sidebar_visible:
+                self.sidebar.Show()
+                self.horizontal_splitter.SplitVertically(self.canvas, self.sidebar, -250)
+                self.sidebar_visible = True
+                print("DEBUG: Sidebar expanded via drag")
+                self.update_menu_states()
+                self.remove_sidebar_expand_button()
+                # Force canvas to redraw with new dimensions
+                wx.CallAfter(self.canvas.Refresh)
+                print("DEBUG: Canvas refresh scheduled after sidebar expansion via drag")
+        
+        event.Skip()
+
+
+    def on_vertical_splitter_changed(self, event):
+        """Handle vertical splitter (status bar) position changes."""
+
+        sash_pos = event.GetSashPosition()
+        splitter_size = self.vertical_splitter.GetSize().GetHeight()
+        
+        print(f"DEBUG: Vertical splitter changed - sash_pos: {sash_pos}, splitter_size: {splitter_size}")
+        print(f"DEBUG: Collapse threshold: {splitter_size - 200}, Current position: {sash_pos}")
+        
+        # Only handle vertical splitter if the sash position is reasonable for vertical splitter
+        # (i.e., not a horizontal splitter position that got misrouted)
+        if sash_pos < splitter_size:  # Valid vertical splitter position
+            # If sash is dragged to the bottom edge (within 200 pixels), collapse status bar
+            if sash_pos > splitter_size - 200:
+                if self.status_bar_visible:
+                    self.status_panel.Hide()
+                    self.vertical_splitter.Unsplit(self.status_panel)
+                    self.status_bar_visible = False
+                    print("DEBUG: Status bar collapsed via drag")
+                    self.update_menu_states()
+                    self.add_status_bar_expand_button()
+                    # Force canvas to redraw with new dimensions
+                    wx.CallAfter(self.canvas.Refresh)
+                    print("DEBUG: Canvas refresh scheduled after status bar collapse via drag")
+            
+            # If sash is dragged away from the edge, ensure status bar is visible
+            elif sash_pos < splitter_size - 300 and not self.status_bar_visible:
+                self.status_panel.Show()
+                self.vertical_splitter.SplitHorizontally(self.main_panel, self.status_panel, -150)
+                self.status_bar_visible = True
+                print("DEBUG: Status bar expanded via drag")
+                self.update_menu_states()
+                self.remove_status_bar_expand_button()
+                # Force canvas to redraw with new dimensions
+                wx.CallAfter(self.canvas.Refresh)
+                print("DEBUG: Canvas refresh scheduled after status bar expansion via drag")
+        
+        event.Skip()
+
+
+    def update_menu_states(self):
+        """Update menu check states to reflect current panel visibility."""
+
+        try:
+            menubar = self.GetMenuBar()
+            if menubar:
+                # Find the View menu (index 2)
+                view_menu = menubar.GetMenu(2)
+                if view_menu:
+                    # Update sidebar menu item (assuming it's the first toggle item after separators)
+                    for i in range(view_menu.GetMenuItemCount()):
+                        item = view_menu.FindItemByPosition(i)
+                        if item and item.GetItemLabelText() == "Show &Sidebar":
+                            item.Check(self.sidebar_visible)
+                        elif item and item.GetItemLabelText() == "Show &Status Bar":
+                            item.Check(self.status_bar_visible)
+        except Exception as e:
+            print(f"DEBUG: Error updating menu states: {e}")
+
+
+    def add_sidebar_expand_button(self):
+        """Add expand button for collapsed sidebar."""
+
+        if hasattr(self, 'sidebar_expand_button'):
+            self.sidebar_expand_button.Destroy()
+        
+        # Create a small button on the right edge of the canvas
+        self.sidebar_expand_button = wx.Button(self.canvas, label="◀", size=(30, 100))
+        self.sidebar_expand_button.SetPosition((self.canvas.GetSize().GetWidth() - 30, 50))
+        self.sidebar_expand_button.Bind(wx.EVT_BUTTON, self.on_expand_sidebar)
+        self.sidebar_expand_button.Show()
+        print("DEBUG: Sidebar expand button added")
+
+
+    def remove_sidebar_expand_button(self):
+        """Remove sidebar expand button."""
+
+        if hasattr(self, 'sidebar_expand_button'):
+            self.sidebar_expand_button.Destroy()
+            delattr(self, 'sidebar_expand_button')
+            print("DEBUG: Sidebar expand button removed")
+
+
+    def add_status_bar_expand_button(self):
+        """Add expand button for collapsed status bar."""
+
+        if hasattr(self, 'status_bar_expand_button'):
+            self.status_bar_expand_button.Destroy()
+        
+        # Create a small button on the bottom edge of the canvas
+        self.status_bar_expand_button = wx.Button(self.canvas, label="▲", size=(100, 30))
+        self.status_bar_expand_button.SetPosition((50, self.canvas.GetSize().GetHeight() - 30))
+        self.status_bar_expand_button.Bind(wx.EVT_BUTTON, self.on_expand_status_bar)
+        self.status_bar_expand_button.Show()
+        print("DEBUG: Status bar expand button added")
+
+
+    def remove_status_bar_expand_button(self):
+        """Remove status bar expand button."""
+
+        if hasattr(self, 'status_bar_expand_button'):
+            self.status_bar_expand_button.Destroy()
+            delattr(self, 'status_bar_expand_button')
+            print("DEBUG: Status bar expand button removed")
+
+
+    def on_expand_sidebar(self, event):
+        """Handle sidebar expand button click."""
+
+        self.sidebar.Show()
+        self.horizontal_splitter.SplitVertically(self.canvas, self.sidebar, -250)
+        self.sidebar_visible = True
+        self.update_menu_states()
+        self.remove_sidebar_expand_button()
+        print("DEBUG: Sidebar expanded via button")
+
+
+    def on_expand_status_bar(self, event):
+        """Handle status bar expand button click."""
+
+        self.status_panel.Show()
+        self.vertical_splitter.SplitHorizontally(self.main_panel, self.status_panel, -150)
+        self.status_bar_visible = True
+        self.update_menu_states()
+        self.remove_status_bar_expand_button()
+        print("DEBUG: Status bar expanded via button")
+
+
+    def apply_enhanced_styling(self):
+        """Apply enhanced styling to all UI elements for better visibility."""
+
+        # Define colors for enhanced visibility (from display settings)
+        button_bg = self.display.button_background_color
+        button_fg = self.display.button_text_color
+        label_fg = self.display.label_text_color
+        control_bg = self.display.control_background_color
+        
+        # Style the Properties button
+        if hasattr(self, 'properties_btn'):
+            self.properties_btn.SetBackgroundColour(button_bg)
+            self.properties_btn.SetForegroundColour(button_fg)
+            font = self.properties_btn.GetFont()
+            font.SetWeight(wx.FONTWEIGHT_BOLD)
+            self.properties_btn.SetFont(font)
+        
+        # Style the Make All Nodes Readable button
+        if hasattr(self, 'make_readable_btn'):
+            self.make_readable_btn.SetBackgroundColour(button_bg)
+            self.make_readable_btn.SetForegroundColour(button_fg)
+            font = self.make_readable_btn.GetFont()
+            font.SetWeight(wx.FONTWEIGHT_BOLD)
+            self.make_readable_btn.SetFont(font)
+        
+        # Style the Set Origin button
+        if hasattr(self, 'set_origin_btn'):
+            self.set_origin_btn.SetBackgroundColour(button_bg)
+            self.set_origin_btn.SetForegroundColour(button_fg)
+            font = self.set_origin_btn.GetFont()
+            font.SetWeight(wx.FONTWEIGHT_BOLD)
+            self.set_origin_btn.SetFont(font)
+        
+        # Style the Set Rotation button
+        if hasattr(self, 'set_rotation_btn'):
+            self.set_rotation_btn.SetBackgroundColour(button_bg)
+            self.set_rotation_btn.SetForegroundColour(button_fg)
+            font = self.set_rotation_btn.GetFont()
+            font.SetWeight(wx.FONTWEIGHT_BOLD)
+            self.set_rotation_btn.SetFont(font)
+        
+        # Style sensitivity +/- buttons
+        for btn_name in [
+            'x_sensitivity_minus', 'x_sensitivity_plus',
+            'y_sensitivity_minus', 'y_sensitivity_plus',
+            'combined_sensitivity_minus', 'combined_sensitivity_plus',
+            'zoom_sensitivity_minus', 'zoom_sensitivity_plus'
+        ]:
+            if hasattr(self, btn_name):
+                btn = getattr(self, btn_name)
+                btn.SetBackgroundColour(button_bg)
+                btn.SetForegroundColour(button_fg)
+                font = btn.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                font.SetPointSize(self.display.small_button_font_point_size)
+                btn.SetFont(font)
+        
+        # Style default properties buttons
+        for btn_name in ['default_node_btn', 'default_edge_btn']:
+            if hasattr(self, btn_name):
+                btn = getattr(self, btn_name)
+                btn.SetBackgroundColour(button_bg)
+                btn.SetForegroundColour(button_fg)
+                font = btn.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                btn.SetFont(font)
+        
+        # Style color buttons and view control buttons
+        for btn_name in [
+            'bg_color_btn', 'grid_color_btn', 'snap_to_original_btn',
+            'set_origin_btn', 'set_rotation_btn', 'set_zoom_btn', 'set_current_view_btn'
+        ]:
+            if hasattr(self, btn_name):
+                btn = getattr(self, btn_name)
+                btn.SetForegroundColour(button_fg)
+                font = btn.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                btn.SetFont(font)
+        
+        # Dropdown and B-spline controls are styled directly when created
+        
+        # Style rotation +/- buttons
+        for btn_name in ['rotation_minus', 'rotation_plus']:
+            if hasattr(self, btn_name):
+                btn = getattr(self, btn_name)
+                btn.SetBackgroundColour(button_bg)
+                btn.SetForegroundColour(button_fg)
+                font = btn.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                font.SetPointSize(self.display.small_button_font_point_size)
+                btn.SetFont(font)
+        
+        # Style spin controls - macOS-specific approach for better visibility
+        def style_spin_control(ctrl, ctrl_name):
+            try:
+                # Try multiple approaches for macOS compatibility
+                
+                # Method 1: Direct color setting
+                ctrl.SetForegroundColour(self.display.spin_ctrl_text_color)
+                ctrl.SetBackgroundColour(self.display.spin_ctrl_background_color)
+                
+                # Method 2: Set font with high contrast
+                font = ctrl.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                font.SetPointSize(self.display.spin_ctrl_font_point_size)
+                ctrl.SetFont(font)
+                
+                # Method 3: Force update
+                ctrl.Refresh()
+                ctrl.Update()
+                
+                # Method 4: Try to access the text control inside SpinCtrlDouble
+                for child in ctrl.GetChildren():
+                    if hasattr(child, 'SetForegroundColour'):
+                        child.SetForegroundColour(self.display.spin_ctrl_text_color)
+                        child.SetBackgroundColour(self.display.spin_ctrl_background_color)
+                        child.Refresh()
+                
+                print(
+                    f"DEBUG: Applied multiple styling methods to {ctrl_name}")
+                
+            except Exception as e:
+                print(f"DEBUG: Error styling {ctrl_name}: {e}")
+        
+        for ctrl_name in [
+            'x_sensitivity_field', 'y_sensitivity_field',
+            'combined_sensitivity_field', 'zoom_sensitivity_field',
+            'rotation_field'
+        ]:
+            if hasattr(self, ctrl_name):
+                ctrl = getattr(self, ctrl_name)
+                style_spin_control(ctrl, ctrl_name)
+                
+                # Schedule another styling attempt after UI is fully loaded
+                wx.CallAfter(style_spin_control, ctrl, f"{ctrl_name}_delayed")
+        
+        # Bind tool selector events (guarded for legacy ToggleButtons)
+        import event_handlers.tool_selector_event_handler as m_tool_selector_event_handler
+        
+        if hasattr(self, 'tool_select') and isinstance(self.tool_select, wx.ToggleButton):
+            self.tool_select.Bind(wx.EVT_TOGGLEBUTTON, lambda evt: m_tool_selector_event_handler.on_tool_select(self, evt))
+        if hasattr(self, 'tool_node') and isinstance(self.tool_node, wx.ToggleButton):
+            self.tool_node.Bind(wx.EVT_TOGGLEBUTTON, lambda evt: m_tool_selector_event_handler.on_tool_select(self, evt))
+        if hasattr(self, 'tool_edge') and isinstance(self.tool_edge, wx.ToggleButton):
+            self.tool_edge.Bind(wx.EVT_TOGGLEBUTTON, lambda evt: m_tool_selector_event_handler.on_tool_select(self, evt))
+        if hasattr(self, 'tool_move') and isinstance(self.tool_move, wx.ToggleButton):
+            self.tool_move.Bind(wx.EVT_TOGGLEBUTTON, lambda evt: m_tool_selector_event_handler.on_tool_select(self, evt))
+        if hasattr(self, 'tool_rotate') and isinstance(self.tool_rotate, wx.ToggleButton):
+            self.tool_rotate.Bind(wx.EVT_TOGGLEBUTTON, lambda evt: m_tool_selector_event_handler.on_tool_select(self, evt))
+        
+        # Style basic controls with black text and better fonts
+        # Do not override tool radios here; they are styled in the sidebar
+        control_list = [
+            'graph_name_ctrl', 'edge_directed_cb', 'grid_enabled_cb',
+            'move_inverted_cb', 'sensitivity_locked_cb'
+        ]
+        
+        for ctrl_name in control_list:
+            if hasattr(self, ctrl_name):
+                ctrl = getattr(self, ctrl_name)
+                ctrl.SetForegroundColour(label_fg)
+                font = ctrl.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_NORMAL)
+                font.SetPointSize(self.display.default_label_font_point_size)
+                ctrl.SetFont(font)
+        
+        # Explicitly style sensitivity labels to ensure they're bold and black
+        label_list = ['x_label', 'y_label', 'combined_label', 'zoom_label']
+        for label_name in label_list:
+            if hasattr(self, label_name):
+                label = getattr(self, label_name)
+                label.SetForegroundColour(label_fg)
+                font = label.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                font.SetPointSize(self.display.bold_label_font_point_size)
+                label.SetFont(font)
+        
+        # Apply enhanced styling to all static text labels
+        def style_labels(widget):
+            if isinstance(widget, wx.StaticText):
+                widget.SetForegroundColour(label_fg)
+                font = widget.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                font.SetPointSize(self.display.default_label_font_point_size)
+                widget.SetFont(font)
+            elif isinstance(widget, wx.StaticBox):
+                widget.SetForegroundColour(label_fg)
+                font = widget.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                font.SetPointSize(self.display.bold_label_font_point_size)
+                widget.SetFont(font)
+            
+            # Recursively apply to children
+            for child in widget.GetChildren():
+                style_labels(child)
+        
+        style_labels(self.sidebar)
+        
+        # Refresh the sidebar to apply changes
+        self.sidebar.Refresh()
+        self.sidebar.Layout()
+    
+
+    def zoom_to_fit(self):
+        """Zoom to fit all items."""
+
+        self.canvas.zoom_to_fit()
+
+
+    def on_zoom_in(self):
+        """Zoom in at current mouse position."""
+
+        if hasattr(self, 'canvas'):
+            self.canvas.zoom_in_at_mouse()
+            self.update_status_bar()
+
+
+    def on_zoom_out(self):
+        """Zoom out at current mouse position."""
+
+        if hasattr(self, 'canvas'):
+            self.canvas.zoom_out_at_mouse()
+            self.update_status_bar()
+
+
+    def change_grid_color(self):
+        """Change grid color."""
+
+        color_dialog = wx.ColourDialog(self)
+        if color_dialog.ShowModal() == wx.ID_OK:
+            new_color = color_dialog.GetColourData().GetColour()
+            # Convert to RGB tuple and store
+            rgb_tuple = (new_color.Red(), new_color.Green(), new_color.Blue())
+            old_color = self.canvas.grid_color
+            
+            # Create and execute command
+            command = ChangeColorCommand(self.canvas, 'grid', old_color,
+                                         rgb_tuple)
+            self.managers.undo_redo_manager.execute_command(command)
+            
+            # Update the button to show the selected color
+            self.grid_color_btn.SetBackgroundColour(new_color)
+            print(f"DEBUG: Grid color changed to RGB{rgb_tuple}")
+        color_dialog.Destroy()
+
+
+    def update_ui(self):
+        """Update UI state including status bar and counters."""
+
+        # Update graph name in the text control
+        if hasattr(self, 'graph_name_ctrl'):
+            self.graph_name_ctrl.SetValue(self.current_graph.name)
+        
+        # Update node and edge counts
+        node_count = len(self.current_graph.get_all_nodes())
+        edge_count = len(self.current_graph.get_all_edges())
+        
+        if hasattr(self, 'node_count_label'):
+            self.node_count_label.SetLabel(f"Nodes: {node_count}")
+        if hasattr(self, 'edge_count_label'):
+            self.edge_count_label.SetLabel(f"Edges: {edge_count}")
+        
+        # Update status bar
+        if hasattr(self, 'statusbar'):
+            self.statusbar.SetStatusText(f"Nodes: {node_count}", 1)
+            self.statusbar.SetStatusText(f"Edges: {edge_count}", 2)
+        
+        # Update window title
+        title = f"Graph Editor - {self.current_graph.name}"
+        if self.current_graph.modified:
+            title += "*"
+        if hasattr(self.current_graph, 'file_path') and self.current_graph.file_path:
+            title += f" - {os.path.basename(self.current_graph.file_path)}"
+        self.SetTitle(title)
+        
+        # Update selection display
+        if hasattr(self, 'update_selection_display'):
+            self.update_selection_display()
+            
+        # Update canvas
+        if hasattr(self, 'canvas'):
+            self.canvas.set_graph(self.current_graph, emit_signal=False)
+            
+        # Ensure enhanced styling is applied
+        self.apply_enhanced_styling()
+
+
+    def on_exit(self, event):
+        """Handle Exit command."""
+
+        self.Close()
+    
+
+    def on_key_down(self, event):
+        """Handle key down events."""
+    
+        # Let the hotkey manager handle the event first
+        if self.managers.hotkey_manager.handle_key_event(event):
+            return
+        
+        # If not handled by hotkeys, let the event propagate
+        event.Skip()
+
+
+    def on_close(self, event):
+        """Handle window closing."""
+
+        # Check for unsaved changes
+        if not self.managers.file_manager.check_unsaved_changes():
+            event.Veto()  # Prevent closing
+            return
+            
+        # Save settings
+        self.managers.layout_manager.save_settings()
+        self.managers.file_manager.save_recent_files()
+        
+        # Allow closing
+        event.Skip()
+        
+        
+    def update_canvas_sensitivity(self):
+        """Update canvas with current sensitivity settings."""
+    
+        if hasattr(self, 'canvas'):
+            self.canvas.set_move_sensitivity(
+                self.x_sensitivity_field.GetValue(),
+                self.y_sensitivity_field.GetValue(),
+                self.move_inverted_cb.GetValue())
+
+
+    def update_canvas_info(self):
+        """Update canvas information display in View Options."""
+
+        if hasattr(self, 'canvas') and hasattr(self, 'center_x_value'):
+            # Prevent sidebar EVT_TEXT handlers from reacting to these programmatic updates
+            self.suppress_view_option_events = True
+            # Get canvas center coordinates (pan values represent the center)
+            center_x = self.canvas.pan_x
+            center_y = self.canvas.pan_y
+            
+            # Update center coordinates
+            # Use ChangeValue to avoid emitting EVT_TEXT and triggering handlers
+            self.center_x_value.ChangeValue(f"{center_x:.1f}")
+            self.center_y_value.ChangeValue(f"{center_y:.1f}")
+            
+            # Calculate world dimensions based on zoom level
+            canvas_size = self.canvas.GetSize()
+            zoom_factor = self.canvas.zoom
+            world_width = canvas_size.GetWidth() / zoom_factor
+            world_height = canvas_size.GetHeight() / zoom_factor
+            
+            # Update world dimensions
+            # Use ChangeValue to avoid emitting EVT_TEXT and triggering handlers
+            self.width_value.ChangeValue(f"{world_width:.1f}")
+            self.height_value.ChangeValue(f"{world_height:.1f}")
+            
+            print(f"DEBUG: Updated canvas info - Center: ({center_x:.1f}, {center_y:.1f}), World Size: {world_width:.1f}x{world_height:.1f} (zoom: {zoom_factor:.3f})")
+            print(f"DEBUG: Width field value: {self.width_value.GetValue()}, Height field value: {self.height_value.GetValue()}")
+            # Re-enable handlers
+            self.suppress_view_option_events = False
