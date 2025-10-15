@@ -39,11 +39,22 @@ def on_show_themes(main_window: "m_main_window.MainWindow", event):
 
 def on_select_theme(main_window: "m_main_window.MainWindow", event, theme_name):
     """Handle theme selection from menu."""
+    if hasattr(main_window, 'mvu_adapter'):
+        try:
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_THEME, name=theme_name))
+            # Persist selection via manager for next launch
+            if getattr(main_window, 'theme_database', None):
+                main_window.theme_database.set_last_selected_theme(theme_name)
+            return
+        except Exception:
+            pass
 
+    # Legacy fallback
     if not getattr(main_window.managers, 'theme_manager', None) or not main_window.theme_database:
         return
     if main_window.managers.theme_manager.set_theme(theme_name):
-        # Save the selected theme
         main_window.theme_database.set_last_selected_theme(theme_name)
         # Apply the theme
         theme_event_handler.apply_current_theme(main_window)
@@ -88,8 +99,17 @@ def on_new_theme(main_window: "m_main_window.MainWindow", event, template_theme=
             main_window.managers.theme_manager.set_theme(theme.name)
             theme_db.set_last_selected_theme(theme.name)
             refresh_custom_themes_menu(main_window)
-            theme_event_handler.apply_current_theme(main_window)
-            update_theme_menu_checks(main_window)
+            try:
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_THEME, name=theme.name))
+                else:
+                    theme_event_handler.apply_current_theme(main_window)
+                    update_theme_menu_checks(main_window)
+            except Exception:
+                theme_event_handler.apply_current_theme(main_window)
+                update_theme_menu_checks(main_window)
     dialog.Destroy()
 
 
@@ -124,8 +144,17 @@ def on_edit_theme(main_window: "m_main_window.MainWindow", event):
             main_window.managers.theme_manager.add_custom_theme(theme)
             main_window.managers.theme_manager.set_theme(theme.name)
             refresh_custom_themes_menu(main_window)
-            apply_current_theme(main_window)
-            update_theme_menu_checks(main_window)
+            try:
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_THEME, name=theme.name))
+                else:
+                    apply_current_theme(main_window)
+                    update_theme_menu_checks(main_window)
+            except Exception:
+                apply_current_theme(main_window)
+                update_theme_menu_checks(main_window)
     dialog.Destroy()
 
 
@@ -164,8 +193,20 @@ def on_delete_theme(main_window: "m_main_window.MainWindow", event):
         if result == wx.YES:
             if main_window.managers.theme_manager.delete_custom_theme(theme_name):
                 refresh_custom_themes_menu(main_window)
-                apply_current_theme(main_window)
-                update_theme_menu_checks(main_window)
+                # After deletion, ThemeManager will have a current theme; propagate
+                try:
+                    if hasattr(main_window, 'mvu_adapter'):
+                        current = main_window.managers.theme_manager.get_current_theme()
+                        if current and hasattr(current, 'name'):
+                            from mvc_mvu.messages import make_message
+                            import mvu.main_mvu as m_main_mvu
+                            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_THEME, name=current.name))
+                    else:
+                        apply_current_theme(main_window)
+                        update_theme_menu_checks(main_window)
+                except Exception:
+                    apply_current_theme(main_window)
+                    update_theme_menu_checks(main_window)
                 wx.MessageBox(f"Theme '{theme_name}' has been deleted.",
                                 "Theme Deleted", wx.OK | wx.ICON_INFORMATION,
                                 main_window)

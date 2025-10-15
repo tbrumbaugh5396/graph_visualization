@@ -285,6 +285,15 @@ class BackgroundDialog(wx.Dialog):
         self.update_layer_list()
         # Select the new layer
         self.layer_list.Select(len(self.background_manager.layers) - 1)
+        try:
+            # Notify MVU to refresh (bg_seq bump)
+            main_window = self.GetParent()
+            if hasattr(main_window, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+        except Exception:
+            pass
         
     def on_remove_layer(self, event):
         """Remove the selected layer."""
@@ -292,6 +301,14 @@ class BackgroundDialog(wx.Dialog):
             self.background_manager.remove_layer(self.selected_layer)
             self.update_layer_list()
             self.selected_layer = None
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+            except Exception:
+                pass
             
     def on_move_up(self, event):
         """Move selected layer up in z-order."""
@@ -301,6 +318,14 @@ class BackgroundDialog(wx.Dialog):
                 self.background_manager.move_layer(self.selected_layer, index - 1)
                 self.update_layer_list()
                 self.layer_list.Select(index - 1)
+                try:
+                    main_window = self.GetParent()
+                    if hasattr(main_window, 'mvu_adapter'):
+                        from mvc_mvu.messages import make_message
+                        import mvu.main_mvu as m_main_mvu
+                        main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+                except Exception:
+                    pass
                 
     def on_move_down(self, event):
         """Move selected layer down in z-order."""
@@ -310,6 +335,14 @@ class BackgroundDialog(wx.Dialog):
                 self.background_manager.move_layer(self.selected_layer, index + 1)
                 self.update_layer_list()
                 self.layer_list.Select(index + 1)
+                try:
+                    main_window = self.GetParent()
+                    if hasattr(main_window, 'mvu_adapter'):
+                        from mvc_mvu.messages import make_message
+                        import mvu.main_mvu as m_main_mvu
+                        main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+                except Exception:
+                    pass
                 
     def on_name_changed(self, event):
         """Handle layer name change."""
@@ -333,18 +366,42 @@ class BackgroundDialog(wx.Dialog):
             self.follow_rotation_cb.Enable(is_fixed)
             self.world_pos_cb.Enable(is_fixed)
             self.background_manager.canvas.Refresh()
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+            except Exception:
+                pass
             
     def on_follow_rotation_changed(self, event):
         """Handle follow rotation toggle."""
         if self.selected_layer:
             self.selected_layer.follow_rotation = self.follow_rotation_cb.GetValue()
             self.background_manager.canvas.Refresh()
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+            except Exception:
+                pass
             
     def on_world_pos_changed(self, event):
         """Handle world position toggle."""
         if self.selected_layer:
             self.selected_layer.use_world_position = self.world_pos_cb.GetValue()
             self.background_manager.canvas.Refresh()
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+            except Exception:
+                pass
             
     def on_fixed_size_changed(self, event):
         """Handle fixed size change."""
@@ -354,11 +411,27 @@ class BackgroundDialog(wx.Dialog):
             self.selected_layer.fixed_width = None if width == -1 else width
             self.selected_layer.fixed_height = None if height == -1 else height
             self.background_manager.canvas.Refresh()
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+            except Exception:
+                pass
             
     def on_opacity_changed(self, event):
         """Handle layer opacity change."""
         if self.selected_layer:
             self.selected_layer.opacity = self.opacity_slider.GetValue() / 100.0
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+            except Exception:
+                pass
             
     def on_browse_image(self, event):
         """Handle image file selection."""
@@ -374,6 +447,14 @@ class BackgroundDialog(wx.Dialog):
             path = dialog.GetPath()
             if self.selected_layer.load_image(path):
                 self.img_path.SetValue(path)
+                try:
+                    main_window = self.GetParent()
+                    if hasattr(main_window, 'mvu_adapter'):
+                        from mvc_mvu.messages import make_message
+                        import mvu.main_mvu as m_main_mvu
+                        main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+                except Exception:
+                    pass
                 
     def on_mode_changed(self, event):
         """Handle display mode change."""
@@ -388,16 +469,40 @@ class BackgroundDialog(wx.Dialog):
         self.selected_layer.mode = mode_map[self.mode_choice.GetSelection()]
         self.update_layer_list()
         self.update_mode_panels()
+        try:
+            main_window = self.GetParent()
+            if hasattr(main_window, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+        except Exception:
+            pass
         
     def on_stretch_changed(self, event):
         """Handle stretch toggle."""
         if self.selected_layer:
             self.selected_layer.stretch = self.stretch_cb.GetValue()
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+            except Exception:
+                pass
             
     def on_aspect_changed(self, event):
         """Handle aspect ratio toggle."""
         if self.selected_layer:
             self.selected_layer.maintain_aspect = self.aspect_cb.GetValue()
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+            except Exception:
+                pass
             
     def on_spacing_changed(self, event):
         """Handle tile spacing change."""
@@ -406,6 +511,14 @@ class BackgroundDialog(wx.Dialog):
                 self.x_spacing.GetValue(),
                 self.y_spacing.GetValue()
             )
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
+            except Exception:
+                pass
             
     def on_add_position(self, event):
         """Add a new image position."""

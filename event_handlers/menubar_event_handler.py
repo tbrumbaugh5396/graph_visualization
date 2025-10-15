@@ -65,15 +65,23 @@ def on_open_graph(main_window: "MainWindow", event):
         if fileDialog.ShowModal() == wx.ID_CANCEL:
             return
         
-        # Load graph
+        # Load graph via MVU if available
         pathname = fileDialog.GetPath()
         try:
-            with open(pathname, 'r') as file:
-                data = json.load(file)
-                main_window.current_graph = m_graph.Graph.from_dict(data)
-                main_window.current_graph.file_path = pathname
-                main_window.SetTitle(f"Graph Editor - {main_window.current_graph.name}")
-                main_window.canvas.Refresh()
+            if hasattr(main_window, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                # Use command-based read to avoid blocking UI
+                main_window.mvu_adapter.dispatch(
+                    make_message(m_main_mvu.Msg.LOAD_GRAPH_FROM_PATH, path=pathname)
+                )
+            else:
+                with open(pathname, 'r') as file:
+                    data = json.load(file)
+                    main_window.current_graph = m_graph.Graph.from_dict(data)
+                    main_window.current_graph.file_path = pathname
+                    main_window.SetTitle(f"Graph Editor - {main_window.current_graph.name}")
+                    main_window.canvas.Refresh()
         except Exception as e:
             wx.MessageBox(f"Failed to open graph: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
 
@@ -84,11 +92,21 @@ def on_save_graph(main_window: "MainWindow", event) -> bool:
         return on_save_graph_as(main_window, event)
     
     try:
-        with open(main_window.current_graph.file_path, 'w') as file:
-            json.dump(main_window.current_graph.to_dict(), file, indent=2)
-            main_window.current_graph.modified = False
-            main_window.SetTitle(f"Graph Editor - {main_window.current_graph.name}")
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            path = main_window.current_graph.file_path
+            content = json.dumps(main_window.current_graph.to_dict(), indent=2)
+            main_window.mvu_adapter.dispatch(
+                make_message(m_main_mvu.Msg.SAVE_GRAPH_TO_PATH, path=path, content=content)
+            )
             return True
+        else:
+            with open(main_window.current_graph.file_path, 'w') as file:
+                json.dump(main_window.current_graph.to_dict(), file, indent=2)
+                main_window.current_graph.modified = False
+                main_window.SetTitle(f"Graph Editor - {main_window.current_graph.name}")
+                return True
     except Exception as e:
         wx.MessageBox(f"Failed to save graph: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
         return False
@@ -106,12 +124,21 @@ def on_save_graph_as(main_window: "MainWindow", event) -> bool:
         # Save graph
         pathname = fileDialog.GetPath()
         try:
-            with open(pathname, 'w') as file:
-                json.dump(main_window.current_graph.to_dict(), file, indent=2)
-                main_window.current_graph.file_path = pathname
-                main_window.current_graph.modified = False
-                main_window.SetTitle(f"Graph Editor - {main_window.current_graph.name}")
+            if hasattr(main_window, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                content = json.dumps(main_window.current_graph.to_dict(), indent=2)
+                main_window.mvu_adapter.dispatch(
+                    make_message(m_main_mvu.Msg.SAVE_GRAPH_TO_PATH, path=pathname, content=content)
+                )
                 return True
+            else:
+                with open(pathname, 'w') as file:
+                    json.dump(main_window.current_graph.to_dict(), file, indent=2)
+                    main_window.current_graph.file_path = pathname
+                    main_window.current_graph.modified = False
+                    main_window.SetTitle(f"Graph Editor - {main_window.current_graph.name}")
+                    return True
         except Exception as e:
             wx.MessageBox(f"Failed to save graph: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
             return False
@@ -230,6 +257,19 @@ def on_undo(main_window: "MainWindow", event):
     """Undo last action."""
     if main_window.managers.undo_redo_manager.can_undo():
         main_window.managers.undo_redo_manager.undo()
+        # Dispatch new undo/redo state and counts to MVU
+        try:
+            if hasattr(main_window, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                can_undo = main_window.managers.undo_redo_manager.can_undo()
+                can_redo = main_window.managers.undo_redo_manager.can_redo()
+                nodes = len(main_window.current_graph.get_all_nodes())
+                edges = len(main_window.current_graph.get_all_edges())
+                main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_UNDO_REDO_STATE, can_undo=can_undo, can_redo=can_redo))
+                main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=nodes, edges=edges))
+        except Exception:
+            pass
         main_window.update_ui()
         main_window.canvas.Refresh()
 
@@ -238,21 +278,42 @@ def on_redo(main_window: "MainWindow", event):
     """Redo last undone action."""
     if main_window.managers.undo_redo_manager.can_redo():
         main_window.managers.undo_redo_manager.redo()
+        # Dispatch new undo/redo state and counts to MVU
+        try:
+            if hasattr(main_window, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                can_undo = main_window.managers.undo_redo_manager.can_undo()
+                can_redo = main_window.managers.undo_redo_manager.can_redo()
+                nodes = len(main_window.current_graph.get_all_nodes())
+                edges = len(main_window.current_graph.get_all_edges())
+                main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_UNDO_REDO_STATE, can_undo=can_undo, can_redo=can_redo))
+                main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=nodes, edges=edges))
+        except Exception:
+            pass
         main_window.update_ui()
         main_window.canvas.Refresh()
 
 
 def update_undo_redo_ui(main_window: "MainWindow"):
     """Update undo/redo UI elements."""
+    can_undo = main_window.managers.undo_redo_manager.can_undo()
+    can_redo = main_window.managers.undo_redo_manager.can_redo()
+    if hasattr(main_window, 'mvu_adapter'):
+        try:
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_UNDO_REDO_STATE, can_undo=can_undo, can_redo=can_redo))
+        except Exception:
+            pass
     if hasattr(main_window, 'undo_item'):
-        main_window.undo_item.Enable(main_window.managers.undo_redo_manager.can_undo())
+        main_window.undo_item.Enable(can_undo)
     if hasattr(main_window, 'redo_item'):
-        main_window.redo_item.Enable(main_window.managers.undo_redo_manager.can_redo())
-    
+        main_window.redo_item.Enable(can_redo)
     toolbar = main_window.GetToolBar()
     if toolbar:
-        toolbar.EnableTool(wx.ID_UNDO, main_window.managers.undo_redo_manager.can_undo())
-        toolbar.EnableTool(wx.ID_REDO, main_window.managers.undo_redo_manager.can_redo())
+        toolbar.EnableTool(wx.ID_UNDO, can_undo)
+        toolbar.EnableTool(wx.ID_REDO, can_redo)
 
 
 def on_copy_selected(main_window: "MainWindow", event):
@@ -277,39 +338,114 @@ def on_paste_selected(main_window: "MainWindow", event):
 def on_delete_selected(main_window: "MainWindow", event):
     """Delete selected items."""
     main_window.canvas.on_delete_selection()
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            nodes = len(main_window.current_graph.get_all_nodes())
+            edges = len(main_window.current_graph.get_all_edges())
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=nodes, edges=edges))
+    except Exception:
+        pass
 
 
 def on_select_all(main_window: "MainWindow", event):
     """Select all items."""
     main_window.canvas.select_all()
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            nodes = len(main_window.current_graph.get_all_nodes())
+            edges = len(main_window.current_graph.get_all_edges())
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=nodes, edges=edges))
+    except Exception:
+        pass
 
 
 # View menu handlers
 def on_zoom_in(main_window: "MainWindow", event):
     """Zoom in at current mouse position."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.ZOOM_IN))
+            return
+    except Exception:
+        pass
     main_window.canvas.zoom_in_at_mouse()
     main_window.update_status_bar()
 
 
 def on_zoom_out(main_window: "MainWindow", event):
     """Zoom out at current mouse position."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.ZOOM_OUT))
+            return
+    except Exception:
+        pass
     main_window.canvas.zoom_out_at_mouse()
     main_window.update_status_bar()
 
 
 def on_zoom_fit(main_window: "MainWindow", event):
     """Zoom to fit all items."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.ZOOM_FIT))
+            return
+    except Exception:
+        pass
     main_window.canvas.zoom_to_fit()
 
 
 def on_toggle_grid(main_window: "MainWindow", event):
     """Toggle grid visibility."""
-    main_window.canvas.toggle_grid()
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            # Infer next visibility from current canvas state (grid_style)
+            visible = True
+            try:
+                visible = getattr(main_window.canvas, 'grid_style', 'grid') != 'grid'
+            except Exception:
+                visible = False
+            main_window.mvu_adapter.dispatch(
+                make_message(m_main_mvu.Msg.TOGGLE_GRID)
+            )
+        else:
+            main_window.canvas.toggle_grid()
+    except Exception:
+        # Fallback to legacy behavior on error
+        try:
+            main_window.canvas.toggle_grid()
+        except Exception:
+            pass
 
 
 def on_toggle_snap(main_window: "MainWindow", event):
     """Toggle grid snapping."""
-    main_window.canvas.toggle_snap()
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(
+                make_message(m_main_mvu.Msg.TOGGLE_SNAP)
+            )
+        else:
+            main_window.canvas.toggle_snap()
+    except Exception:
+        try:
+            main_window.canvas.toggle_snap()
+        except Exception:
+            pass
 
 
 # Layout menu handlers
@@ -367,11 +503,17 @@ def on_configure_hotkeys(main_window: "MainWindow", event):
 
 def on_background_layers(main_window: "MainWindow", event):
     """Show background layers dialog."""
-    
     from gui.background_dialog import BackgroundDialog
     dialog = BackgroundDialog(main_window, main_window.canvas.background_manager)
     if dialog.ShowModal() == wx.ID_OK:
-        main_window.canvas.Refresh()
+        try:
+            if hasattr(main_window, 'mvu_adapter'):
+                # After changes, just refresh; future: dispatch BG_* messages per action within dialog
+                main_window.canvas.Refresh()
+            else:
+                main_window.canvas.Refresh()
+        except Exception:
+            main_window.canvas.Refresh()
     dialog.Destroy()
 
 

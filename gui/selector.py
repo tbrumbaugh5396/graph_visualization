@@ -63,5 +63,16 @@ def update_selection_display(main_window: "m_main_window.MainWindow"):
 
 def on_selection_changed(main_window: "m_main_window.MainWindow"):
     """Handle selection change in canvas."""
-
-    update_selection_display(main_window) 
+    update_selection_display(main_window)
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            nodes = len(main_window.current_graph.get_selected_nodes())
+            edges = len(main_window.current_graph.get_selected_edges())
+            # For status bar totals we still want all counts, not selected counts
+            all_nodes = len(main_window.current_graph.get_all_nodes())
+            all_edges = len(main_window.current_graph.get_all_edges())
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=all_nodes, edges=all_edges))
+    except Exception:
+        pass

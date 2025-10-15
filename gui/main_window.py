@@ -17,6 +17,11 @@ import sys
 if __name__ == "__main__":
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Ensure MVC_MVU framework (sibling repo) is importable
+MVC_MVU_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'MVC_MVU'))
+if os.path.isdir(MVC_MVU_DIR) and MVC_MVU_DIR not in sys.path:
+    sys.path.insert(0, MVC_MVU_DIR)
+
 # Use absolute imports for better compatibility
 # event handlers
 # -graph canvas
@@ -70,6 +75,11 @@ from utils.app_managers import AppManagers
 import utils.managers.theme_manager as m_theme_manager
 from utils.commands import ChangeColorCommand
 
+# MVU imports
+from mvc_mvu.mvc_adapter import MVUAdapter, UIState
+from mvc_mvu.messages import make_message
+import mvu.main_mvu as m_main_mvu
+
 
 class MainWindow(wx.Frame):
     """Main application window."""
@@ -101,6 +111,9 @@ class MainWindow(wx.Frame):
         
         # Update UI state
         self.update_ui()
+
+        # Initialize MVU adapter after UI is ready
+        self._init_mvu_adapter()
 
 
     def setup_ui(self):
@@ -185,58 +198,125 @@ class MainWindow(wx.Frame):
 
     def toggle_sidebar(self):
         """Toggle sidebar visibility."""
-
-        if self.sidebar_visible:
-            # Hide sidebar
-            self.sidebar.Hide()
-            self.horizontal_splitter.Unsplit(self.sidebar)
-            self.sidebar_visible = False
-            print("DEBUG: Sidebar hidden")
-            self.add_sidebar_expand_button()
+        if hasattr(self, 'mvu_adapter'):
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.TOGGLE_SIDEBAR))
         else:
-            # Show sidebar
-            self.sidebar.Show()
-            self.horizontal_splitter.SplitVertically(self.canvas, self.sidebar, -250)
-            self.sidebar_visible = True
-            print("DEBUG: Sidebar shown")
-            self.remove_sidebar_expand_button()
-        
-        # Refresh the layout and force canvas redraw
-        self.horizontal_splitter.Refresh()
-        self.Layout()
-
-        # Force canvas to redraw with new dimensions and show additional visible area
-        # Use CallAfter to ensure layout is processed before refresh
-        wx.CallAfter(self.canvas.Refresh)
-        print("DEBUG: Canvas refresh scheduled after sidebar toggle")
+            # Fallback to direct behavior if MVU not initialized yet
+            self.set_sidebar_visible(not getattr(self, 'sidebar_visible', True))
 
 
     def toggle_status_bar(self):
         """Toggle status bar visibility."""
-
-        if self.status_bar_visible:
-            # Hide status bar
-            self.status_panel.Hide()
-            self.vertical_splitter.Unsplit(self.status_panel)
-            self.status_bar_visible = False
-            print("DEBUG: Status bar hidden")
-            self.add_status_bar_expand_button()
+        if hasattr(self, 'mvu_adapter'):
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.TOGGLE_STATUS))
         else:
+            # Fallback to direct behavior if MVU not initialized yet
+            self.set_status_bar_visible(not getattr(self, 'status_bar_visible', True))
+
+    def set_sidebar_visible(self, visible: bool):
+        """Idempotently show/hide sidebar and refresh UI."""
+        if getattr(self, 'sidebar_visible', True) == visible:
+            return
+        if visible:
+            # Show sidebar
+            self.sidebar.Show()
+            self.horizontal_splitter.SplitVertically(self.canvas, self.sidebar, -250)
+            self.sidebar_visible = True
+            print("DEBUG: Sidebar shown (set)")
+            self.remove_sidebar_expand_button()
+        else:
+            # Hide sidebar
+            self.sidebar.Hide()
+            self.horizontal_splitter.Unsplit(self.sidebar)
+            self.sidebar_visible = False
+            print("DEBUG: Sidebar hidden (set)")
+            self.add_sidebar_expand_button()
+        # Refresh the layout and force canvas redraw
+        self.horizontal_splitter.Refresh()
+        self.Layout()
+        wx.CallAfter(self.canvas.Refresh)
+        print("DEBUG: Canvas refresh scheduled after set_sidebar_visible")
+
+    def set_status_bar_visible(self, visible: bool):
+        """Idempotently show/hide status bar and refresh UI."""
+        if getattr(self, 'status_bar_visible', True) == visible:
+            return
+        if visible:
             # Show status bar
             self.status_panel.Show()
             self.vertical_splitter.SplitHorizontally(self.main_panel, self.status_panel, -150)
             self.status_bar_visible = True
-            print("DEBUG: Status bar shown")
+            print("DEBUG: Status bar shown (set)")
             self.remove_status_bar_expand_button()
-        
+        else:
+            # Hide status bar
+            self.status_panel.Hide()
+            self.vertical_splitter.Unsplit(self.status_panel)
+            self.status_bar_visible = False
+            print("DEBUG: Status bar hidden (set)")
+            self.add_status_bar_expand_button()
         # Refresh the layout and force canvas redraw
         self.vertical_splitter.Refresh()
         self.Layout()
-
-        # Force canvas to redraw with new dimensions and show additional visible area
-        # Use CallAfter to ensure layout is processed before refresh
         wx.CallAfter(self.canvas.Refresh)
-        print("DEBUG: Canvas refresh scheduled after status bar toggle")
+        print("DEBUG: Canvas refresh scheduled after set_status_bar_visible")
+
+    def _init_mvu_adapter(self):
+        """Initialize MVU adapter and sync with current UI state."""
+        try:
+            ui_state = UIState()
+            ui_state.bind_widget('main_window', self)
+            initial_model = m_main_mvu.initial_model_fn(
+                sidebar_visible=getattr(self, 'sidebar_visible', True),
+                status_bar_visible=getattr(self, 'status_bar_visible', True),
+                grid_visible=(getattr(self, 'canvas', None) is not None and getattr(self.canvas, 'grid_style', 'grid') != 'none'),
+                snap_enabled=(getattr(self, 'canvas', None) is not None and (
+                    getattr(self.canvas, 'grid_snapping_enabled', True) or getattr(self.canvas, 'snap_to_grid', True)
+                ))
+            )
+            self.mvu_adapter = MVUAdapter(
+                initial_model=initial_model,
+                update_fn=m_main_mvu.update_fn,
+                ui_state=ui_state,
+                ui_render=m_main_mvu.ui_render,
+            )
+            # Apply initial render to ensure UI and model are in sync
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_SIDEBAR_VISIBLE, visible=initial_model.sidebar_visible))
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_STATUS_VISIBLE, visible=initial_model.status_bar_visible))
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_GRID_VISIBLE, visible=initial_model.grid_visible))
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_SNAP_ENABLED, enabled=initial_model.snap_enabled))
+            # Seed theme from ThemeManager if available
+            try:
+                if getattr(self.managers, 'theme_manager', None) and self.managers.theme_manager.get_current_theme():
+                    theme = self.managers.theme_manager.get_current_theme()
+                    if theme and hasattr(theme, 'name'):
+                        self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_THEME, name=theme.name))
+            except Exception:
+                pass
+            # Seed undo/redo state and counts
+            try:
+                can_undo = self.managers.undo_redo_manager.can_undo()
+                can_redo = self.managers.undo_redo_manager.can_redo()
+                self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_UNDO_REDO_STATE, can_undo=can_undo, can_redo=can_redo))
+                nodes = len(self.current_graph.get_all_nodes())
+                edges = len(self.current_graph.get_all_edges())
+                self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=nodes, edges=edges))
+            except Exception:
+                pass
+            # Seed movement/zoom/rotation from current UI if available
+            try:
+                move_x = getattr(self, 'x_sensitivity_field', None).GetValue() if hasattr(self, 'x_sensitivity_field') else 1.0
+                move_y = getattr(self, 'y_sensitivity_field', None).GetValue() if hasattr(self, 'y_sensitivity_field') else 1.0
+                inverted = getattr(self, 'move_inverted_cb', None).GetValue() if hasattr(self, 'move_inverted_cb') else False
+                self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_MOVE_SENSITIVITY, x=move_x, y=move_y, inverted=inverted))
+                zoom_sens = getattr(self, 'zoom_sensitivity_field', None).GetValue() if hasattr(self, 'zoom_sensitivity_field') else 1.0
+                self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ZOOM_SENSITIVITY, value=zoom_sens))
+                rotation = getattr(self, 'rotation_field', None).GetValue() if hasattr(self, 'rotation_field') else 0.0
+                self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ROTATION, angle=rotation))
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"DEBUG: Failed to initialize MVU adapter: {e}")
 
 
     def on_horizontal_splitter_changed(self, event):
@@ -257,6 +337,8 @@ class MainWindow(wx.Frame):
                     self.sidebar.Hide()
                     self.horizontal_splitter.Unsplit(self.sidebar)
                     self.sidebar_visible = False
+                    if hasattr(self, 'mvu_adapter'):
+                        self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_SIDEBAR_VISIBLE, visible=False))
                     print("DEBUG: Sidebar collapsed via drag")
                     self.update_menu_states()
                     self.add_sidebar_expand_button()
@@ -269,6 +351,8 @@ class MainWindow(wx.Frame):
                 self.sidebar.Show()
                 self.horizontal_splitter.SplitVertically(self.canvas, self.sidebar, -250)
                 self.sidebar_visible = True
+                if hasattr(self, 'mvu_adapter'):
+                    self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_SIDEBAR_VISIBLE, visible=True))
                 print("DEBUG: Sidebar expanded via drag")
                 self.update_menu_states()
                 self.remove_sidebar_expand_button()
@@ -297,6 +381,8 @@ class MainWindow(wx.Frame):
                     self.status_panel.Hide()
                     self.vertical_splitter.Unsplit(self.status_panel)
                     self.status_bar_visible = False
+                    if hasattr(self, 'mvu_adapter'):
+                        self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_STATUS_VISIBLE, visible=False))
                     print("DEBUG: Status bar collapsed via drag")
                     self.update_menu_states()
                     self.add_status_bar_expand_button()
@@ -309,6 +395,8 @@ class MainWindow(wx.Frame):
                 self.status_panel.Show()
                 self.vertical_splitter.SplitHorizontally(self.main_panel, self.status_panel, -150)
                 self.status_bar_visible = True
+                if hasattr(self, 'mvu_adapter'):
+                    self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_STATUS_VISIBLE, visible=True))
                 print("DEBUG: Status bar expanded via drag")
                 self.update_menu_states()
                 self.remove_status_bar_expand_button()
@@ -391,6 +479,8 @@ class MainWindow(wx.Frame):
         self.sidebar.Show()
         self.horizontal_splitter.SplitVertically(self.canvas, self.sidebar, -250)
         self.sidebar_visible = True
+        if hasattr(self, 'mvu_adapter'):
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_SIDEBAR_VISIBLE, visible=True))
         self.update_menu_states()
         self.remove_sidebar_expand_button()
         print("DEBUG: Sidebar expanded via button")
@@ -402,6 +492,8 @@ class MainWindow(wx.Frame):
         self.status_panel.Show()
         self.vertical_splitter.SplitHorizontally(self.main_panel, self.status_panel, -150)
         self.status_bar_visible = True
+        if hasattr(self, 'mvu_adapter'):
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_STATUS_VISIBLE, visible=True))
         self.update_menu_states()
         self.remove_status_bar_expand_button()
         print("DEBUG: Status bar expanded via button")
@@ -612,24 +704,31 @@ class MainWindow(wx.Frame):
 
     def zoom_to_fit(self):
         """Zoom to fit all items."""
-
-        self.canvas.zoom_to_fit()
+        if hasattr(self, 'mvu_adapter'):
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.ZOOM_FIT))
+        else:
+            if hasattr(self, 'canvas'):
+                self.canvas.zoom_to_fit()
 
 
     def on_zoom_in(self):
         """Zoom in at current mouse position."""
-
-        if hasattr(self, 'canvas'):
-            self.canvas.zoom_in_at_mouse()
-            self.update_status_bar()
+        if hasattr(self, 'mvu_adapter'):
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.ZOOM_IN))
+        else:
+            if hasattr(self, 'canvas'):
+                self.canvas.zoom_in_at_mouse()
+                self.update_status_bar()
 
 
     def on_zoom_out(self):
         """Zoom out at current mouse position."""
-
-        if hasattr(self, 'canvas'):
-            self.canvas.zoom_out_at_mouse()
-            self.update_status_bar()
+        if hasattr(self, 'mvu_adapter'):
+            self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.ZOOM_OUT))
+        else:
+            if hasattr(self, 'canvas'):
+                self.canvas.zoom_out_at_mouse()
+                self.update_status_bar()
 
 
     def change_grid_color(self):
@@ -640,16 +739,18 @@ class MainWindow(wx.Frame):
             new_color = color_dialog.GetColourData().GetColour()
             # Convert to RGB tuple and store
             rgb_tuple = (new_color.Red(), new_color.Green(), new_color.Blue())
-            old_color = self.canvas.grid_color
-            
-            # Create and execute command
-            command = ChangeColorCommand(self.canvas, 'grid', old_color,
-                                         rgb_tuple)
-            self.managers.undo_redo_manager.execute_command(command)
-            
-            # Update the button to show the selected color
-            self.grid_color_btn.SetBackgroundColour(new_color)
-            print(f"DEBUG: Grid color changed to RGB{rgb_tuple}")
+            if hasattr(self, 'mvu_adapter'):
+                self.mvu_adapter.dispatch(
+                    make_message(m_main_mvu.Msg.SET_GRID_COLOR, r=rgb_tuple[0], g=rgb_tuple[1], b=rgb_tuple[2])
+                )
+            else:
+                old_color = self.canvas.grid_color
+                # Create and execute command (legacy fallback)
+                command = ChangeColorCommand(self.canvas, 'grid', old_color, rgb_tuple)
+                self.managers.undo_redo_manager.execute_command(command)
+                # Update the button to show the selected color
+                self.grid_color_btn.SetBackgroundColour(new_color)
+                print(f"DEBUG: Grid color changed to RGB{rgb_tuple}")
         color_dialog.Destroy()
 
 
@@ -663,6 +764,11 @@ class MainWindow(wx.Frame):
         # Update node and edge counts
         node_count = len(self.current_graph.get_all_nodes())
         edge_count = len(self.current_graph.get_all_edges())
+        if hasattr(self, 'mvu_adapter'):
+            try:
+                self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=node_count, edges=edge_count))
+            except Exception:
+                pass
         
         if hasattr(self, 'node_count_label'):
             self.node_count_label.SetLabel(f"Nodes: {node_count}")

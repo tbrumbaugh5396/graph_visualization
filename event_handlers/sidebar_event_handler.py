@@ -1034,10 +1034,22 @@ def on_bspline_toggle_click_mode(main_window: "m_main_window.MainWindow", event)
 # Move tool event handlers
 def on_inverted_changed(main_window: "m_main_window.MainWindow", event):
     """Handle inverted movement toggle change."""
-
     print(
         f"DEBUG: Inverted movement changed to {main_window.move_inverted_cb.GetValue()}"
     )
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(
+                m_main_mvu.Msg.SET_MOVE_SENSITIVITY,
+                x=main_window.x_sensitivity_field.GetValue(),
+                y=main_window.y_sensitivity_field.GetValue(),
+                inverted=main_window.move_inverted_cb.GetValue()
+            ))
+            return
+    except Exception:
+        pass
     main_window.update_canvas_sensitivity()
 
 
@@ -1049,41 +1061,89 @@ def on_sensitivity_lock_changed(main_window: "m_main_window.MainWindow", event):
 
 def on_combined_sensitivity_changed(main_window: "m_main_window.MainWindow", event):
     """Handle combined sensitivity field change."""
-
     new_value = main_window.combined_sensitivity_field.GetValue()
     # Update both X and Y when combined sensitivity changes
     main_window.x_sensitivity_field.SetValue(new_value)
     main_window.y_sensitivity_field.SetValue(new_value)
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(
+                m_main_mvu.Msg.SET_MOVE_SENSITIVITY,
+                x=new_value,
+                y=new_value,
+                inverted=main_window.move_inverted_cb.GetValue()
+            ))
+            return
+    except Exception:
+        pass
     main_window.update_canvas_sensitivity()
 
 
 def adjust_x_sensitivity(main_window: "m_main_window.MainWindow", delta):
     """Adjust X sensitivity by delta amount."""
-
     current = main_window.x_sensitivity_field.GetValue()
     new_value = max(0.1, min(10.0, current + delta))
     main_window.x_sensitivity_field.SetValue(new_value)
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(
+                m_main_mvu.Msg.SET_MOVE_SENSITIVITY,
+                x=new_value,
+                y=main_window.y_sensitivity_field.GetValue(),
+                inverted=main_window.move_inverted_cb.GetValue()
+            ))
+            return
+    except Exception:
+        pass
     main_window.update_canvas_sensitivity()
 
 
 def adjust_y_sensitivity(main_window: "m_main_window.MainWindow", delta):
     """Adjust Y sensitivity by delta amount."""
-
     current = main_window.y_sensitivity_field.GetValue()
     new_value = max(0.1, min(10.0, current + delta))
     main_window.y_sensitivity_field.SetValue(new_value)
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(
+                m_main_mvu.Msg.SET_MOVE_SENSITIVITY,
+                x=main_window.x_sensitivity_field.GetValue(),
+                y=new_value,
+                inverted=main_window.move_inverted_cb.GetValue()
+            ))
+            return
+    except Exception:
+        pass
     main_window.update_canvas_sensitivity()
 
 
 def adjust_combined_sensitivity(main_window: "m_main_window.MainWindow", delta):
     """Adjust combined sensitivity by delta amount."""
-
     current = main_window.combined_sensitivity_field.GetValue()
     new_value = max(0.1, min(10.0, current + delta))
     main_window.combined_sensitivity_field.SetValue(new_value)
     # Update both X and Y when combined sensitivity changes
     main_window.x_sensitivity_field.SetValue(new_value)
     main_window.y_sensitivity_field.SetValue(new_value)
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(
+                m_main_mvu.Msg.SET_MOVE_SENSITIVITY,
+                x=new_value,
+                y=new_value,
+                inverted=main_window.move_inverted_cb.GetValue()
+            ))
+            return
+    except Exception:
+        pass
     main_window.update_canvas_sensitivity()
 
 
@@ -1110,16 +1170,36 @@ def update_move_tool_ui(main_window: "m_main_window.MainWindow"):
 
 def adjust_zoom_sensitivity(main_window: "m_main_window.MainWindow", delta):
     """Adjust zoom sensitivity by delta amount."""
-
     current = main_window.zoom_sensitivity_field.GetValue()
     new_value = max(0.1, min(5.0, current + delta))
     main_window.zoom_sensitivity_field.SetValue(new_value)
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(
+                m_main_mvu.Msg.SET_ZOOM_SENSITIVITY,
+                value=new_value
+            ))
+            return
+    except Exception:
+        pass
     main_window.update_canvas_zoom_sensitivity()
 
 
 def on_zoom_sensitivity_changed(main_window: "m_main_window.MainWindow", event):
     """Handle zoom sensitivity field change."""
-
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(
+                m_main_mvu.Msg.SET_ZOOM_SENSITIVITY,
+                value=main_window.zoom_sensitivity_field.GetValue()
+            ))
+            return
+    except Exception:
+        pass
     main_window.update_canvas_zoom_sensitivity()
 
 
@@ -1141,12 +1221,27 @@ def adjust_rotation(main_window: "m_main_window.MainWindow", delta):
         if new_value < 0:
             new_value += 360
         main_window.rotation_field.SetValue(new_value)
+        try:
+            if hasattr(main_window, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ROTATION, angle=new_value))
+                return
+        except Exception:
+            pass
         update_canvas_rotation(main_window)
 
 
 def on_rotation_changed(main_window: "m_main_window.MainWindow", event):
     """Handle rotation field change."""
-
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ROTATION, angle=main_window.rotation_field.GetValue()))
+            return
+    except Exception:
+        pass
     update_canvas_rotation(main_window)
 
 
