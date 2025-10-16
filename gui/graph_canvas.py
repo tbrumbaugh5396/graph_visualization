@@ -6156,6 +6156,17 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             # Mark graph as modified
             if hasattr(self, 'graph_modified'):
                 self.graph_modified.emit()
+            # Notify MVU of updated counts
+            try:
+                mw = self.GetParent().GetParent()
+                if hasattr(mw, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    all_nodes = len(self.graph.get_all_nodes())
+                    all_edges = len(self.graph.get_all_edges())
+                    mw.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=all_nodes, edges=all_edges))
+            except Exception:
+                pass
                 
             self.Refresh()
             print(f"DEBUG: 📖 Container expanded with {edges_restored} edges restored")
@@ -6218,6 +6229,17 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             # Mark graph as modified
             if hasattr(self, 'graph_modified'):
                 self.graph_modified.emit()
+            # Notify MVU of updated counts
+            try:
+                mw = self.GetParent().GetParent()
+                if hasattr(mw, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    all_nodes = len(self.graph.get_all_nodes())
+                    all_edges = len(self.graph.get_all_edges())
+                    mw.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=all_nodes, edges=all_edges))
+            except Exception:
+                pass
                 
             self.Refresh()
             print(f"DEBUG: 📕 Container collapsed with {edges_redirected} edges redirected")
@@ -6239,6 +6261,17 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             # Mark graph as modified
             if hasattr(self, 'graph_modified'):
                 self.graph_modified.emit()
+            # Notify MVU of updated counts
+            try:
+                mw = self.GetParent().GetParent()
+                if hasattr(mw, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    all_nodes = len(self.graph.get_all_nodes())
+                    all_edges = len(self.graph.get_all_edges())
+                    mw.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=all_nodes, edges=all_edges))
+            except Exception:
+                pass
                 
             self.Refresh()
             print(f"DEBUG: 🔄📖 Recursive expand completed - expanded {expanded_count} containers")
@@ -6265,6 +6298,17 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             # Mark graph as modified
             if hasattr(self, 'graph_modified'):
                 self.graph_modified.emit()
+            # Notify MVU of updated counts
+            try:
+                mw = self.GetParent().GetParent()
+                if hasattr(mw, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    all_nodes = len(self.graph.get_all_nodes())
+                    all_edges = len(self.graph.get_all_edges())
+                    mw.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_COUNTS, nodes=all_nodes, edges=all_edges))
+            except Exception:
+                pass
                 
             self.Refresh()
             print(f"DEBUG: 🔄📕 Recursive collapse completed - collapsed {collapsed_count} containers")

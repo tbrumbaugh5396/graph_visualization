@@ -387,14 +387,18 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
         print(f"DEBUG: 🔧 Controls already created, returning early")
         return
     
-    # B-spline Control Points panel
-    main_window.bspline_box = wx.StaticBox(main_window.sidebar,
+    # B-spline Control Points panel (place under Graph Properties pane if available)
+    parent_container = getattr(main_window, 'graph_properties_pane', None)
+    parent_window = parent_container.GetPane() if parent_container else main_window.sidebar
+    target_sizer = getattr(main_window, 'graph_properties_sizer', None)
+
+    main_window.bspline_box = wx.StaticBox(parent_window,
                                     label="B-spline Control Points")
     main_window.bspline_box.SetForegroundColour(wx.Colour(0, 0, 0))  # Black text
     main_window.bspline_sizer = wx.StaticBoxSizer(main_window.bspline_box, wx.VERTICAL)
     
     # Control points list
-    main_window.bspline_list = wx.ListCtrl(main_window.sidebar,
+    main_window.bspline_list = wx.ListCtrl(parent_window,
                                     style=wx.LC_REPORT | wx.LC_SINGLE_SEL,
                                     size=(220, 120))
     main_window.bspline_list.AppendColumn("Index", width=50)
@@ -405,7 +409,7 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
     # Control buttons
     bspline_btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
     
-    main_window.bspline_add_btn = wx.Button(main_window.sidebar,
+    main_window.bspline_add_btn = wx.Button(parent_window,
                                         label="Add",
                                         size=(50, 25))
     main_window.bspline_add_btn.SetForegroundColour(wx.Colour(0, 0, 0))
@@ -426,7 +430,7 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
     # Don't actually bind this, just log that we could
     bspline_btn_sizer.Add(main_window.bspline_add_btn, 0, wx.ALL, 2)
     
-    main_window.bspline_edit_btn = wx.Button(main_window.sidebar,
+    main_window.bspline_edit_btn = wx.Button(parent_window,
                                         label="Edit",
                                         size=(50, 25))
     main_window.bspline_edit_btn.SetForegroundColour(wx.Colour(0, 0, 0))
@@ -436,7 +440,7 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
                                 partial(on_bspline_edit_control_point, main_window))
     bspline_btn_sizer.Add(main_window.bspline_edit_btn, 0, wx.ALL, 2)
     
-    main_window.bspline_delete_btn = wx.Button(main_window.sidebar,
+    main_window.bspline_delete_btn = wx.Button(parent_window,
                                         label="Delete",
                                         size=(50, 25))
     main_window.bspline_delete_btn.SetForegroundColour(wx.Colour(0, 0, 0))
@@ -452,14 +456,14 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
     # Reorder buttons
     reorder_sizer = wx.BoxSizer(wx.HORIZONTAL)
     
-    main_window.bspline_up_btn = wx.Button(main_window.sidebar, label="↑", size=(30, 25))
+    main_window.bspline_up_btn = wx.Button(parent_window, label="↑", size=(30, 25))
     main_window.bspline_up_btn.SetForegroundColour(wx.Colour(0, 0, 0))
     main_window.bspline_up_btn.SetBackgroundColour(wx.Colour(255, 255, 255))
     main_window.bspline_up_btn.Refresh()
     main_window.bspline_up_btn.Bind(wx.EVT_BUTTON, partial(on_bspline_move_up, main_window))
     reorder_sizer.Add(main_window.bspline_up_btn, 0, wx.ALL, 2)
     
-    main_window.bspline_down_btn = wx.Button(main_window.sidebar,
+    main_window.bspline_down_btn = wx.Button(parent_window,
                                         label="↓",
                                         size=(30, 25))
     main_window.bspline_down_btn.SetForegroundColour(wx.Colour(0, 0, 0))
@@ -469,7 +473,7 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
     reorder_sizer.Add(main_window.bspline_down_btn, 0, wx.ALL, 2)
     
     # Add click mode toggle
-    main_window.bspline_click_mode_btn = wx.Button(main_window.sidebar,
+    main_window.bspline_click_mode_btn = wx.Button(parent_window,
                                             label="Click to Add",
                                             size=(80, 25))
     main_window.bspline_click_mode_btn.SetForegroundColour(wx.Colour(
@@ -484,7 +488,7 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
         f"DEBUG: 🔧 Click button label: '{main_window.bspline_click_mode_btn.GetLabel()}'"
     )
     main_window.bspline_click_mode_btn.Bind(wx.EVT_BUTTON,
-                                        main_window.on_bspline_toggle_click_mode)
+                                        partial(on_bspline_toggle_click_mode, main_window))
     print(
         f"DEBUG: 🔧 Bound bspline_click_mode_btn to on_bspline_toggle_click_mode"
     )
@@ -494,12 +498,12 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
     
     # Source and Target info (read-only)
     info_sizer = wx.BoxSizer(wx.VERTICAL)
-    main_window.bspline_source_label = wx.StaticText(main_window.sidebar,
+    main_window.bspline_source_label = wx.StaticText(parent_window,
                                                 label="Source: ")
     main_window.bspline_source_label.SetForegroundColour(wx.Colour(0, 100, 0))
     info_sizer.Add(main_window.bspline_source_label, 0, wx.ALL, 2)
     
-    main_window.bspline_target_label = wx.StaticText(main_window.sidebar,
+    main_window.bspline_target_label = wx.StaticText(parent_window,
                                                 label="Target: ")
     main_window.bspline_target_label.SetForegroundColour(wx.Colour(100, 0, 0))
     info_sizer.Add(main_window.bspline_target_label, 0, wx.ALL, 2)
@@ -589,14 +593,17 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
     main_window.composite_sizer = composite_sizer
     main_window.composite_sizer.ShowItems(False)  # Hide initially
     
-    # Add to edge sizer if not already added
+    # Add to Graph Properties if available; fallback to edge section
     if not main_window.bspline_added_to_sizer:
-        # Add to the edge rendering section after edge anchor choice
-        edge_sizer = main_window.edge_type_choice.GetParent().GetSizer()
-        # First add the B-spline controls (Composite Curve Segments)
-        edge_sizer.Add(main_window.bspline_sizer, 0, wx.EXPAND | wx.ALL, 2)
-        # Then add the composite controls
-        edge_sizer.Add(main_window.composite_sizer, 0, wx.EXPAND | wx.ALL, 2)
+        if target_sizer is not None:
+            target_sizer.Add(main_window.bspline_sizer, 0, wx.EXPAND | wx.ALL, 5)
+            if hasattr(main_window, 'composite_sizer'):
+                target_sizer.Add(main_window.composite_sizer, 0, wx.EXPAND | wx.ALL, 5)
+        else:
+            edge_sizer = main_window.edge_type_choice.GetParent().GetSizer()
+            edge_sizer.Add(main_window.bspline_sizer, 0, wx.EXPAND | wx.ALL, 2)
+            if hasattr(main_window, 'composite_sizer'):
+                edge_sizer.Add(main_window.composite_sizer, 0, wx.EXPAND | wx.ALL, 2)
         main_window.bspline_added_to_sizer = True
     
     main_window.bspline_controls_created = True

@@ -719,6 +719,8 @@ def setup_sidebar(main_window: "m_main_window.MainWindow"):
     
     graph_properties_panel =  main_window.graph_properties_pane.GetPane()
     graph_sizer = wx.BoxSizer(wx.VERTICAL)
+    # Expose graph properties sizer for other UI (e.g., control points) to attach under this section
+    main_window.graph_properties_sizer = graph_sizer
 
     main_window.graph_name_ctrl = wx.TextCtrl(graph_properties_panel,
                                     value= main_window.current_graph.name)
@@ -1092,8 +1094,8 @@ def setup_sidebar(main_window: "m_main_window.MainWindow"):
             f"DEBUG: 🎛️ Initial control points state: { main_window.canvas.control_points_enabled}"
         )
     
-    # Add Property Panel
-    main_window.property_panel_pane = wx.CollapsiblePane(main_window.sidebar, label="Graph Properties")
+    # Add Property Panel (rename to avoid confusion with Graph Properties section)
+    main_window.property_panel_pane = wx.CollapsiblePane(main_window.sidebar, label="Property Panel")
     main_window.property_panel_pane.SetForegroundColour(wx.Colour(0, 0, 0))
     main_window.collapsible_panes.append(main_window.property_panel_pane)
     # Bind individual pane expansion events
