@@ -507,45 +507,47 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
         with world_transform(gc, graph_canvas):
             print(f"DEBUG: Applied world_transform: pan=({graph_canvas.pan_x:.1f},{graph_canvas.pan_y:.1f}) zoom={graph_canvas.zoom:.6f} rot={graph_canvas.world_rotation}°")
         
-        # Draw checkboard background if enabled (AFTER rotation so it rotates with world)
-        if graph_canvas.checkerboard_background:
-            # Check if checkboard has been temporarily disabled due to crashes
-            if not hasattr(graph_canvas, '_checkboard_crash_disabled'):
-                graph_canvas._checkboard_crash_disabled = False
+        # Draw grid-aligned visuals (checkerboard and grid) under the world transform
+        with world_transform(gc, graph_canvas):
+            # Draw checkboard background if enabled (rotates/moves/scales with world)
+            if graph_canvas.checkerboard_background:
+                # Check if checkboard has been temporarily disabled due to crashes
+                if not hasattr(graph_canvas, '_checkboard_crash_disabled'):
+                    graph_canvas._checkboard_crash_disabled = False
                 
-            if not graph_canvas._checkboard_crash_disabled:
-                try:
-                    result = draw_checkboard_aligned_with_grid(graph_canvas, dc)
-                    if isinstance(result, tuple):
-                        squares_drawn, c1, c2 = result
-                        if squares_drawn < 0:
-                            print(f"DEBUG: 🏁 Checkerboard blended fill path used, color={c1}")
+                if not graph_canvas._checkboard_crash_disabled:
+                    try:
+                        result = draw_checkboard_aligned_with_grid(graph_canvas, dc)
+                        if isinstance(result, tuple):
+                            squares_drawn, c1, c2 = result
+                            if squares_drawn < 0:
+                                print(f"DEBUG: 🏁 Checkerboard blended fill path used, color={c1}")
+                            else:
+                                print(f"DEBUG: 🏁 Drew checkerboard: {squares_drawn} squares, color1={c1}, color2={c2}")
                         else:
-                            print(f"DEBUG: 🏁 Drew checkerboard: {squares_drawn} squares, color1={c1}, color2={c2}")
-                    else:
-                        print("DEBUG: 🏁 Drew checkerboard (no return info)")
-                except Exception as e:
-                    print(f"DEBUG: 🔴 Checkboard drawing failed: {e}")
-                    # Temporarily disable checkboard to prevent repeated crashes
-                    print("DEBUG: 🛑 TEMPORARILY disabling checkboard due to crash - restart app to re-enable")
-                    graph_canvas._checkboard_crash_disabled = True
-                    graph_canvas.checkerboard_background = False
-                                
-                    # Update UI to reflect this change
-                    if hasattr(graph_canvas, 'main_window') and hasattr(graph_canvas.main_window, 'checkboard_bg_cb'):
-                        try:
-                            graph_canvas.main_window.checkboard_bg_cb.SetValue(False)
-                        except:
-                            pass  # Ignore UI update errors
-        
-        # Draw grid/dots using the main grid drawing function
-        print(f"DEBUG: Grid check - style: '{graph_canvas.grid_style}', spacing: {graph_canvas.grid_spacing}")
-        if graph_canvas.grid_style != "none":
-            print("DEBUG: Grid enabled, drawing with proper bounds calculation")
-            draw_grid(graph_canvas, dc, gc)
-            print("DEBUG: Called draw_grid")
-        else:
-            print("DEBUG: Grid disabled (style is 'none')")
+                            print("DEBUG: 🏁 Drew checkerboard (no return info)")
+                    except Exception as e:
+                        print(f"DEBUG: 🔴 Checkboard drawing failed: {e}")
+                        # Temporarily disable checkboard to prevent repeated crashes
+                        print("DEBUG: 🛑 TEMPORARILY disabling checkboard due to crash - restart app to re-enable")
+                        graph_canvas._checkboard_crash_disabled = True
+                        graph_canvas.checkerboard_background = False
+                                    
+                        # Update UI to reflect this change
+                        if hasattr(graph_canvas, 'main_window') and hasattr(graph_canvas.main_window, 'checkboard_bg_cb'):
+                            try:
+                                graph_canvas.main_window.checkboard_bg_cb.SetValue(False)
+                            except:
+                                pass  # Ignore UI update errors
+            
+            # Draw grid/dots using the main grid drawing function
+            print(f"DEBUG: Grid check - style: '{graph_canvas.grid_style}', spacing: {graph_canvas.grid_spacing}")
+            if graph_canvas.grid_style != "none":
+                print("DEBUG: Grid enabled, drawing with proper bounds calculation")
+                draw_grid(graph_canvas, dc, gc)
+                print("DEBUG: Called draw_grid")
+            else:
+                print("DEBUG: Grid disabled (style is 'none')")
         
         # Duplicate checkerboard and grid drawing removed; handled inside world transform above
         

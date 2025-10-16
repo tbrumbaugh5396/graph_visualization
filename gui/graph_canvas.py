@@ -415,7 +415,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             print(f"DEBUG: Ignoring magnify zoom because zoom_input_mode={mode}")
             event.Skip()
             return
-
+        
         if self.zoom_event_in_progress:
             print(f"DEBUG: Skipping magnify #{self.zoom_event_counter} - zoom event already in progress")
             return
@@ -1476,7 +1476,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         for node in reversed(nodes):
             if not node.visible:
                 continue
-
+                
             # Use the same pipeline as drawing for the node center
             cx, cy = self.world_to_screen(node.x, node.y)
 
@@ -1503,7 +1503,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 return node
             else:
                 print(f"DEBUG: Node '{node.text}' miss: center=({cx:.1f},{cy:.1f}), dxdy=({dx:.1f},{dy:.1f}), half=({half_w:.1f},{half_h:.1f}), mouse=({screen_x},{screen_y})")
-
+        
         print("DEBUG: ❌ No visible node found at position")
         return None
 
@@ -4870,28 +4870,37 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                     self.graph.select_node(node.id)
                 self.selection_changed.emit()
             
-            # If snap to grid is enabled, snap the selected nodes
-            if self.snap_to_grid:
-                for selected_node in self.graph.get_selected_nodes():
-                    snapped_pos = self.snap_to_grid_position(selected_node.x, selected_node.y)
-                    selected_node.x = snapped_pos[0]
-                    selected_node.y = snapped_pos[1]
-                    print(f"DEBUG: Snapped node {selected_node.id} to grid: ({snapped_pos[0]:.1f}, {snapped_pos[1]:.1f})")
-                self.graph.modified = True
-                self.graph_modified.emit()
-                self.Refresh()
+            # Defer grid snapping until mouse-up; keep drag smooth and cursor-following
             
-            # Start dragging
+            # Start dragging (node(s))
             self.dragging = True
             self.drag_start_pos = pos
             world_pos = self.screen_to_world(pos.x, pos.y)
+            # Anchor the node under the cursor so it follows the cursor directly
+            anchor_node = self.get_node_at_position(pos.x, pos.y)
+            self.drag_anchor_node_id = anchor_node.id if anchor_node else None
             self.drag_offset.clear()
             self.drag_original_positions.clear()
             for selected_node in self.graph.get_selected_nodes():
-                self.drag_offset[selected_node.id] = (selected_node.x - world_pos[0],
-                                                    selected_node.y - world_pos[1])
-                self.drag_original_positions[selected_node.id] = (selected_node.x, selected_node.y)
+                if getattr(self, 'drag_anchor_node_id', None) == selected_node.id:
+                    # No offset for the node under the cursor: center follows cursor
+                    self.drag_offset[selected_node.id] = (0.0, 0.0)
+                else:
+                    self.drag_offset[selected_node.id] = (selected_node.x - world_pos[0],
+                                                        selected_node.y - world_pos[1])
+                    self.drag_original_positions[selected_node.id] = (selected_node.x, selected_node.y)
             print(f"DEBUG: Starting drag with {len(self.drag_offset)} nodes")
+            # Clear any in-progress selection rectangle when starting a drag
+            self.selection_start = None
+            self.selection_rect = None
+            # Capture mouse to ensure we receive move/up even if cursor leaves canvas
+            try:
+                if not self.HasCapture():
+                    self.CaptureMouse()
+            except Exception:
+                pass
+            self.Refresh()
+            return
         elif edge:
             # Edge selection
             print(f"DEBUG: Clicking on edge {edge.id}")
@@ -4961,19 +4970,29 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                     self.graph.select_node(node.id)
                 self.selection_changed.emit()
 
-            # Start dragging
+            # Start dragging (node)
             self.dragging = True
             self.drag_start_pos = pos
 
             # Calculate drag offsets and store original positions for all selected nodes
             world_pos = self.screen_to_world(pos.x, pos.y)
+            anchor_node = self.get_node_at_position(pos.x, pos.y)
+            self.drag_anchor_node_id = anchor_node.id if anchor_node else None
             self.drag_offset.clear()
             self.drag_original_positions.clear()
             
             for selected_node in self.graph.get_selected_nodes():
-                self.drag_offset[selected_node.id] = (selected_node.x - world_pos[0],
-                                                      selected_node.y - world_pos[1])
-                self.drag_original_positions[selected_node.id] = (selected_node.x, selected_node.y)
+                if getattr(self, 'drag_anchor_node_id', None) == selected_node.id:
+                    self.drag_offset[selected_node.id] = (0.0, 0.0)
+                else:
+                    self.drag_offset[selected_node.id] = (selected_node.x - world_pos[0],
+                                                        selected_node.y - world_pos[1])
+                    self.drag_original_positions[selected_node.id] = (selected_node.x, selected_node.y)
+            try:
+                if not self.HasCapture():
+                    self.CaptureMouse()
+            except Exception:
+                pass
 
         elif edge:
             # Edge selection
@@ -5001,10 +5020,18 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                     self.graph.select_edge(connected_edge.id)
             self.selection_changed.emit()
             
-            # Start dragging
+            # Start dragging (edge)
             self.dragging = True
             self.dragging_edge = edge
             self.drag_start_pos = pos
+            # Cancel rectangle selection
+            self.selection_start = None
+            self.selection_rect = None
+            try:
+                if not self.HasCapture():
+                    self.CaptureMouse()
+            except Exception:
+                pass
             
             # For ubergraph edges, also start endpoint dragging to enable movement
             if edge.is_hyperedge and edge.hyperedge_visualization == "ubergraph":
@@ -5012,11 +5039,47 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 self.dragging_endpoint = "ubergraph"  # Special case for ubergraph movement
 
         else:
-            # Start selection rectangle or canvas panning
+            # Start selection rectangle or canvas panning or group drag
             if wx.GetKeyState(wx.WXK_SPACE):
                 self.dragging_canvas = True
                 self.drag_start_pos = pos
             else:
+                # If clicking inside the bounding box of the current selection, start a group drag
+                selected_nodes = list(self.graph.get_selected_nodes())
+                if selected_nodes:
+                    min_x = min_y = float('inf')
+                    max_x = max_y = float('-inf')
+                    for n in selected_nodes:
+                        sx, sy = self.world_to_screen(n.x, n.y)
+                        if sx < min_x: min_x = sx
+                        if sy < min_y: min_y = sy
+                        if sx > max_x: max_x = sx
+                        if sy > max_y: max_y = sy
+                    # Add a small margin
+                    margin = 8
+                    min_x -= margin; min_y -= margin; max_x += margin; max_y += margin
+                    if min_x <= pos.x <= max_x and min_y <= pos.y <= max_y:
+                        # Begin group drag for all selected nodes
+                        self.dragging = True
+                        self.drag_start_pos = pos
+                        world_pos = self.screen_to_world(pos.x, pos.y)
+                        self.drag_anchor_node_id = None
+                        self.drag_offset.clear()
+                        self.drag_original_positions.clear()
+                        for sn in selected_nodes:
+                            self.drag_offset[sn.id] = (sn.x - world_pos[0], sn.y - world_pos[1])
+                            self.drag_original_positions[sn.id] = (sn.x, sn.y)
+                        # Cancel any selection rectangle
+                        self.selection_start = None
+                        self.selection_rect = None
+                        try:
+                            if not self.HasCapture():
+                                self.CaptureMouse()
+                        except Exception:
+                            pass
+                        self.Refresh()
+                        return
+
                 if not wx.GetKeyState(wx.WXK_CONTROL):
                     print("DEBUG: Clicking on empty space - clearing selection")
                     self.graph.clear_selection()
@@ -5024,7 +5087,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
 
                 self.selection_start = pos
                 self.selection_rect = wx.Rect(pos.x, pos.y, 0, 0)
-
+        
         self.Refresh()
 
     def handle_select_up(self, pos):
@@ -5150,6 +5213,16 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                         self.undo_redo_manager.execute_command(composite_command)
                     
                     print(f"DEBUG: Created move command(s) for {len(commands)} node(s)")
+
+        # Snap selected nodes on release (after drag completes)
+        if self.dragging and self.snap_to_grid and self.drag_original_positions:
+            for node_id in list(self.drag_original_positions.keys()):
+                node = self.graph.get_node(node_id)
+                if node:
+                    sx, sy = self.snap_to_grid_position(node.x, node.y)
+                    node.x, node.y = sx, sy
+            self.graph.modified = True
+            self.graph_modified.emit()
                         
         if self.selection_rect:
             # Only select items if the user actually dragged to create a meaningful rectangle
@@ -5180,6 +5253,12 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         # Clear selection states
         self.selection_rect = None
         self.selection_start = None
+        # Release mouse capture if held
+        try:
+            if self.HasCapture():
+                self.ReleaseMouse()
+        except Exception:
+            pass
 
         self.Refresh()
 
@@ -5217,6 +5296,44 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
 
     def handle_select_motion(self, pos):
         """Handle select tool mouse motion."""
+        # Ensure we keep mouse capture during drags to avoid "stuck" behavior
+        try:
+            if self.dragging and not self.HasCapture():
+                self.CaptureMouse()
+        except Exception:
+            pass
+        # Lazy-init a node drag if mouse-down was missed but button is held
+        try:
+            if not self.dragging and not self.dragging_canvas:
+                ms = wx.GetMouseState()
+                if ms.LeftIsDown():
+                    anchor = self.get_node_at_position(pos.x, pos.y)
+                    if anchor and anchor.selected:
+                        self.dragging = True
+                        self.drag_start_pos = pos
+                        world_pos = self.screen_to_world(pos.x, pos.y)
+                        self.drag_anchor_node_id = anchor.id
+                        self.drag_offset.clear()
+                        self.drag_original_positions.clear()
+                        for selected_node in self.graph.get_selected_nodes():
+                            if selected_node.id == self.drag_anchor_node_id:
+                                self.drag_offset[selected_node.id] = (0.0, 0.0)
+                            else:
+                                self.drag_offset[selected_node.id] = (
+                                    selected_node.x - world_pos[0],
+                                    selected_node.y - world_pos[1]
+                                )
+                                self.drag_original_positions[selected_node.id] = (selected_node.x, selected_node.y)
+                        # Cancel any selection rectangle once dragging starts
+                        self.selection_start = None
+                        self.selection_rect = None
+                        try:
+                            if not self.HasCapture():
+                                self.CaptureMouse()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
         
         # Handle auto-panning when dragging near edges
         if self.dragging and not self.dragging_canvas:
@@ -5271,33 +5388,21 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                     self.graph_modified.emit()
                     self.Refresh()
         elif self.dragging:
-            # Update node positions
+            # Update node positions (no snapping during drag so the node follows the cursor smoothly)
             if self.drag_start_pos and self.drag_offset:
                 world_pos = self.screen_to_world(pos.x, pos.y)
-                
                 # Update all selected nodes
-            for node_id, (dx, dy) in self.drag_offset.items():
-                node = self.graph.get_node(node_id)
-                if node:
-                    # Calculate new position based on mouse movement
-                    new_x = world_pos[0] + dx
-                    new_y = world_pos[1] + dy
-                    
-                    # If grid snapping is enabled, snap each node's position
-                    if self.snap_to_grid:
-                        snapped_pos = self.snap_to_grid_position(new_x, new_y)
-                        new_x = snapped_pos[0]
-                        new_y = snapped_pos[1]
-                        print(f"DEBUG: Snapped node {node_id} to grid: ({new_x:.1f}, {new_y:.1f})")
-                    
-                    # Update node position
-                    node.x = new_x
-                    node.y = new_y
-                    print(f"DEBUG: Moving node {node_id} to ({new_x:.1f}, {new_y:.1f})")
-                
-            self.graph.modified = True
-            self.graph_modified.emit()
-            self.Refresh()
+                for node_id, (dx, dy) in self.drag_offset.items():
+                    node = self.graph.get_node(node_id)
+                    if node:
+                        new_x = world_pos[0] + dx
+                        new_y = world_pos[1] + dy
+                        node.x = new_x
+                        node.y = new_y
+                        print(f"DEBUG: Moving node {node_id} to ({new_x:.1f}, {new_y:.1f}) (no snap during drag)")
+                self.graph.modified = True
+                self.graph_modified.emit()
+                self.Refresh()
             # elif self.dragging:
             #     print("DEBUG: Dragging but no drag_start_pos or drag_offset")
         elif self.dragging_canvas:
@@ -5666,7 +5771,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         """Handle rotate tool mouse motion."""
 
         print(f"DEBUG: 🔄 handle_rotate_motion called with dragging_rotation={getattr(self, 'dragging_rotation', False)}")
-
+        
         if hasattr(self, 'dragging_rotation') and self.dragging_rotation and hasattr(self, 'rotation_start_angle'):
             # For world rotation, ALWAYS use screen center as rotation point
             size = self.GetSize()
