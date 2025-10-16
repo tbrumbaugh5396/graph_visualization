@@ -26,6 +26,12 @@ def update(t: Any, d: dict, model) -> Optional[UpdateResult]:
     if name == 'SET_ZOOM_SENSITIVITY':
         new_model = type(model)(**{**model.__dict__, 'zoom_sensitivity': float(d['value'])})
         return UpdateResult(model=new_model)
+    if name == 'SET_ZOOM_INPUT_MODE':
+        mode = str(d['mode']).lower()
+        if mode not in ('wheel', 'touchpad'):
+            mode = 'wheel'
+        new_model = type(model)(**{**model.__dict__, 'zoom_input_mode': mode})
+        return UpdateResult(model=new_model)
     if name == 'SET_ROTATION':
         new_model = type(model)(**{**model.__dict__, 'rotation_deg': float(d['angle'])})
         return UpdateResult(model=new_model)
@@ -76,9 +82,74 @@ def render(ui_state, model, last) -> None:
                 mw.canvas.set_zoom_sensitivity(model.zoom_sensitivity)
             else:
                 setattr(mw.canvas, 'zoom_sensitivity', model.zoom_sensitivity)
+        # Zoom input mode
+        if last is None or getattr(last, 'zoom_input_mode', None) != getattr(model, 'zoom_input_mode', None):
+            try:
+                new_mode = getattr(model, 'zoom_input_mode', 'wheel')
+                setattr(mw.canvas, 'zoom_input_mode', new_mode)
+                print(f"DEBUG: MVU render set canvas.zoom_input_mode = {new_mode}")
+            except Exception as _e:
+                print(f"DEBUG: Failed to set canvas.zoom_input_mode: {_e}")
+            # Optionally rebind handlers to be extra safe (not strictly necessary,
+            # handlers still check mode at runtime). We keep the binding but rely on
+            # early-return in handlers for performance and correctness.
         # Rotation
         if last is None or getattr(last, 'rotation_deg', None) != model.rotation_deg:
-            mw.canvas.set_world_rotation(model.rotation_deg)
+            try:
+                dragging = bool(getattr(mw.canvas, 'dragging_rotation', False))
+            except Exception:
+                dragging = False
+            if not dragging:
+                print(f"DEBUG: MVU render applying rotation: {model.rotation_deg}°")
+                mw.canvas.set_world_rotation(model.rotation_deg)
+                # Reflect rotation value in UI if available
+                try:
+                    if hasattr(mw, 'rotation_field'):
+                        mw.rotation_field.SetValue(model.rotation_deg)
+                        print(f"DEBUG: MVU render updated rotation_field to {model.rotation_deg}°")
+                except Exception:
+                    pass
+
+        # Property edits (node/edge text)
+        try:
+            # Apply node text edits
+            if last is None or getattr(last, 'node_text_seq', None) != getattr(model, 'node_text_seq', None):
+                node_id = getattr(model, 'last_node_text_id', None)
+                text_val = getattr(model, 'last_node_text_value', None)
+                if node_id and text_val is not None and hasattr(mw, 'current_graph'):
+                    node = mw.current_graph.nodes.get(node_id)
+                    if node:
+                        node.text = text_val
+                        mw.canvas.Refresh()
+            # Apply edge text edits
+            if last is None or getattr(last, 'edge_text_seq', None) != getattr(model, 'edge_text_seq', None):
+                edge_id = getattr(model, 'last_edge_text_id', None)
+                text_val = getattr(model, 'last_edge_text_value', None)
+                if edge_id and text_val is not None and hasattr(mw, 'current_graph'):
+                    edge = mw.current_graph.edges.get(edge_id)
+                    if edge:
+                        edge.text = text_val
+                        mw.canvas.Refresh()
+        except Exception:
+            pass
+
+        # Layout application
+        if last is None or getattr(last, 'layout_seq', None) != getattr(model, 'layout_seq', None):
+            try:
+                name = getattr(model, 'last_layout_name', None)
+                if name:
+                    # Map to existing layout handlers in gui.layouts or canvas methods
+                    if name.lower() == 'spring' and hasattr(mw.canvas, 'apply_spring_layout'):
+                        mw.canvas.apply_spring_layout()
+                    elif name.lower() == 'circle' and hasattr(mw.canvas, 'apply_circular_layout'):
+                        mw.canvas.apply_circular_layout()
+                    elif name.lower() == 'tree' and hasattr(mw.canvas, 'apply_hierarchical_layout'):
+                        mw.canvas.apply_hierarchical_layout()
+                    elif name.lower() == 'random' and hasattr(mw.canvas, 'apply_random_layout'):
+                        mw.canvas.apply_random_layout()
+                    mw.canvas.Refresh()
+            except Exception:
+                pass
     except Exception as e:
         print(f"canvas_mvu.render error: {e}")
 

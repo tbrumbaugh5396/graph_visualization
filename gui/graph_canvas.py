@@ -124,7 +124,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         self.zoom_event_in_progress = False
         self.zoom_event_counter = 0
         self.zoom_active = False  # True while handling a zoom gesture (wheel/magnify)
-        self._zoom_active_timer_ms = 120  # small suppression window to block pan during zoom
+        self._zoom_active_timer_ms = 150  # slightly longer suppression window to block pan during zoom
         self.zoom_gesture_sign = 0  # +1/-1 during a zoom gesture to debounce direction
         self._zoom_direction_epsilon = 0.02  # deadzone around no zoom (wider to prevent jitter)
         self.pan_suppressed = False  # Flag to suppress all pan modifications during zoom
@@ -252,12 +252,15 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         self.Bind(wx.EVT_RIGHT_UP, self.on_right_up)
         self.Bind(wx.EVT_MOTION, self.on_motion)
         self.Bind(wx.EVT_MOUSEWHEEL, self.on_mousewheel)
+        self._wheel_bound = True
         
         # Try to bind magnify event - may not be supported on all systems
         try:
             self.Bind(wx.EVT_MAGNIFY, self.on_magnify)
+            self._magnify_bound = True
             print("DEBUG: wx.EVT_MAGNIFY binding successful")
         except (AttributeError, TypeError):
+            self._magnify_bound = False
             print("DEBUG: wx.EVT_MAGNIFY not supported on this system")
             
         # Try additional gesture events
@@ -287,6 +290,18 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
 
     def on_mousewheel(self, event):
         """Handle mouse wheel events for zooming."""
+        # Enforce exclusivity: respect canvas.zoom_input_mode if present (kept in sync by MVU)
+        mode = getattr(self, 'zoom_input_mode', None)
+        if mode is None:
+            try:
+                if hasattr(self, 'main_window') and hasattr(self.main_window, 'mvu_adapter'):
+                    mode = getattr(self.main_window.mvu_adapter.model, 'zoom_input_mode', 'wheel')
+            except Exception:
+                mode = 'wheel'
+        if mode == 'touchpad':
+            print(f"DEBUG: Ignoring mouse wheel zoom because zoom_input_mode={mode}")
+            event.Skip()
+            return
         self.zoom_event_counter += 1
         print(f"DEBUG: ===== MOUSE WHEEL EVENT #{self.zoom_event_counter} START =====")
         
@@ -388,6 +403,19 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         self.zoom_event_counter += 1
         print(f"DEBUG: ===== MAGNIFY EVENT #{self.zoom_event_counter} START =====")
         
+        # Enforce exclusivity: respect canvas.zoom_input_mode if present (kept in sync by MVU)
+        mode = getattr(self, 'zoom_input_mode', None)
+        if mode is None:
+            try:
+                if hasattr(self, 'main_window') and hasattr(self.main_window, 'mvu_adapter'):
+                    mode = getattr(self.main_window.mvu_adapter.model, 'zoom_input_mode', 'wheel')
+            except Exception:
+                mode = 'wheel'
+        if mode == 'wheel':
+            print(f"DEBUG: Ignoring magnify zoom because zoom_input_mode={mode}")
+            event.Skip()
+            return
+
         if self.zoom_event_in_progress:
             print(f"DEBUG: Skipping magnify #{self.zoom_event_counter} - zoom event already in progress")
             return
@@ -400,20 +428,33 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             # Suppress panning during magnify zoom gesture
             self.pan_suppressed = True
 
-            # Heuristic: Some platforms emit a small delta (e.g. ±0.02), others a factor (>1 in, <1 out)
+            # Use same base and sensitivity mapping as wheel to match behavior
+            base_factor = 1.2
+            # Heuristic: Some platforms emit a small delta (e.g., ±0.02) vs factor (>1 in, <1 out)
             if -0.3 <= magnification <= 0.3:
-                # Treat as delta around 0. Use an exponential base for smoothness
-                base_factor = 1.2
-                exponent = magnification * (3.0 * self.zoom_sensitivity)
+                # Map tiny magnification deltas to "fractional steps" similar to wheel notches
+                # Choose k so that a typical delta (0.05) ≈ 1 step -> exponent ≈ 1 * sensitivity
+                k = 20.0
+                frac_steps = magnification * k
+                direction = 1.0 if frac_steps >= 0 else -1.0
+                effective_sensitivity = self.zoom_sensitivity * (0.85 if direction < 0 else 1.0)
+                exponent = frac_steps * effective_sensitivity
                 zoom_factor = pow(base_factor, exponent)
                 mode = "delta"
             else:
-                # Treat as multiplicative factor (>=1 in, <1 out)
+                # magnification represents a factor (>=1 in, <1 out). Convert to wheel-equivalent exponent
                 if magnification <= 0:
-                    # Guard against non-positive values
                     zoom_factor = 1.0
                 else:
-                    zoom_factor = pow(magnification, max(0.1, self.zoom_sensitivity))
+                    # exponent such that base_factor^exponent == magnification
+                    try:
+                        raw_exp = math.log(magnification) / math.log(base_factor)
+                    except Exception:
+                        raw_exp = 0.0
+                    direction = 1.0 if raw_exp >= 0 else -1.0
+                    effective_sensitivity = self.zoom_sensitivity * (0.85 if direction < 0 else 1.0)
+                    exponent = raw_exp * effective_sensitivity
+                    zoom_factor = pow(base_factor, exponent)
                 mode = "factor"
 
             # Clamp to avoid extreme jumps
@@ -609,6 +650,16 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         self.tool = tool
         self.edge_start_node = None
         self.edge_start_connection = None
+        # Re-sync MVU model rotation on tool change
+        try:
+            mw = self.GetParent().GetParent()
+            if hasattr(mw, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                # Always push current canvas rotation to model on tool switch to avoid stale resets
+                mw.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ROTATION, angle=self.world_rotation))
+        except Exception:
+            pass
 
     def set_move_sensitivity(self, x_sensitivity: float, y_sensitivity: float, inverted: bool):
         """Set move tool sensitivity and inversion settings."""
@@ -639,6 +690,15 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             self._zoom_accum_ln = 0.0
             self._zoom_apply_scheduled = False
             self.zoom_at_point(zoom_factor, anchor_point)
+            # Re-sync MVU model rotation after zoom apply
+            try:
+                mw = self.GetParent().GetParent()
+                if hasattr(mw, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    mw.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ROTATION, angle=self.world_rotation))
+            except Exception:
+                pass
         except Exception as e:
             print(f"DEBUG: _apply_accumulated_zoom error: {e}")
             self._zoom_accum_ln = 0.0
@@ -1407,45 +1467,28 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
 
     def get_node_at_position(self, screen_x: int,
                              screen_y: int) -> Optional[m_node.Node]:
-        """Get the node at the given screen position, accounting for world rotation."""
+        """Get the node at the given screen position using unified world_to_screen transform."""
 
         print(f"DEBUG: get_node_at_position: screen({screen_x}, {screen_y}), world_rotation={self.world_rotation}°")
 
-        # For each node, check if the mouse position hits its visual screen position
-        # Iterate in reverse order to select topmost (last drawn) node when overlapping
+        # Iterate in reverse order to pick topmost node on overlaps
         nodes = self.graph.get_all_nodes()
         for node in reversed(nodes):
             if not node.visible:
                 continue
-                
-            # Compute visual screen position exactly like draw: screen = (world*zoom + pan) then rotate
-            sx = node.x * self.zoom + self.pan_x
-            sy = node.y * self.zoom + self.pan_y
-            if self.world_rotation != 0.0:
-                size = self.GetSize()
-                center_x = size.width / 2.0
-                center_y = size.height / 2.0
-                rotation_rad = math.radians(self.world_rotation)
-                cos_angle = math.cos(rotation_rad)
-                sin_angle = math.sin(rotation_rad)
-                temp_x = sx - center_x
-                temp_y = sy - center_y
-                rotated_x = temp_x * cos_angle - temp_y * sin_angle
-                rotated_y = temp_x * sin_angle + temp_y * cos_angle
-                visual_screen_pos = (rotated_x + center_x, rotated_y + center_y)
-            else:
-                visual_screen_pos = (sx, sy)
-            
-            # Hit test in screen space, accounting for zoom and node rotation
-            half_width_screen = (node.width * self.zoom) / 2.0
-            half_height_screen = (node.height * self.zoom) / 2.0
 
-            # Compute mouse delta from node center in screen coords
-            dx = screen_x - visual_screen_pos[0]
-            dy = screen_y - visual_screen_pos[1]
+            # Use the same pipeline as drawing for the node center
+            cx, cy = self.world_to_screen(node.x, node.y)
 
-            # Undo node's own rotation (in screen space) to test against axis-aligned bounds
-            node_rot = getattr(node, 'rotation', 0.0) or 0.0
+            # Hit test in screen space; scale node bounds by zoom; enforce a small min size for usability
+            half_w = max(6.0, (node.width * self.zoom) / 2.0)
+            half_h = max(6.0, (node.height * self.zoom) / 2.0)
+
+            dx = float(screen_x - cx)
+            dy = float(screen_y - cy)
+
+            # Undo node-local rotation in screen space if present
+            node_rot = float(getattr(node, 'rotation', 0.0) or 0.0)
             if abs(node_rot) > 1e-6:
                 rot_rad = -math.radians(node_rot)
                 cos_r = math.cos(rot_rad)
@@ -1454,16 +1497,14 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 rdy = dx * sin_r + dy * cos_r
                 dx, dy = rdx, rdy
 
-            inside = (-half_width_screen <= dx <= half_width_screen and
-                      -half_height_screen <= dy <= half_height_screen)
-
+            inside = (-half_w <= dx <= half_w) and (-half_h <= dy <= half_h)
             if inside:
-                print(f"DEBUG: ✅ Found node '{node.text}' at visual position {visual_screen_pos} (zoom and rotation-aware)")
+                print(f"DEBUG: ✅ Found node '{node.text}' at visual position ({cx:.1f},{cy:.1f})")
                 return node
             else:
-                print(f"DEBUG: Node '{node.text}' miss: center={visual_screen_pos}, dxdy=({dx:.1f},{dy:.1f}), half=({half_width_screen:.1f},{half_height_screen:.1f}), mouse=({screen_x},{screen_y})")
-        
-        print(f"DEBUG: ❌ No visible node found at position")
+                print(f"DEBUG: Node '{node.text}' miss: center=({cx:.1f},{cy:.1f}), dxdy=({dx:.1f},{dy:.1f}), half=({half_w:.1f},{half_h:.1f}), mouse=({screen_x},{screen_y})")
+
+        print("DEBUG: ❌ No visible node found at position")
         return None
 
     def get_edge_at_position(self, screen_x: int, screen_y: int) -> Optional[m_edge.Edge]:
@@ -5489,7 +5530,15 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         """Handle move tool mouse up."""
 
         print(f"DEBUG: Move tool up at {pos.x}, {pos.y}")
-        # No special handling needed for move tool up
+        # Re-sync MVU model rotation after move completes
+        try:
+            mw = self.GetParent().GetParent()
+            if hasattr(mw, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                mw.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ROTATION, angle=self.world_rotation))
+        except Exception:
+            pass
 
     def move_world(self):
         """Move the world based on mouse drag."""
@@ -5580,7 +5629,8 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
     def handle_rotate_up(self, pos):
         """Handle rotate tool mouse up."""
 
-        print(f"DEBUG: ✅ Rotate tool released at {pos.x}, {pos.y} - Final rotation: {self.world_rotation:.1f}°")
+        final_rotation = getattr(self, 'world_rotation', 0.0) or 0.0
+        print(f"DEBUG: ✅ Rotate tool released at {pos.x}, {pos.y} - Final rotation: {final_rotation:.1f}°")
         print(f"DEBUG: 🔴 Hiding rotation center dot (show_rotation_center = False)")
         self.dragging_rotation = False
         self.show_rotation_center = False  # Hide center dot
@@ -5589,10 +5639,24 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         try:
             main_window = self.GetParent().GetParent()
             if hasattr(main_window, 'rotation_field'):
-                main_window.rotation_field.SetValue(self.world_rotation)
-                print(f"DEBUG: ✅ Final rotation UI update: {self.world_rotation:.1f}°")
+                main_window.rotation_field.SetValue(final_rotation)
+                print(f"DEBUG: ✅ Final rotation UI update: {final_rotation:.1f}°")
             else:
                 print(f"DEBUG: ❌ rotation_field not found in main window during release")
+            # Ensure MVU model stores the final rotation so subsequent renders keep it
+            if hasattr(main_window, 'mvu_adapter'):
+                try:
+                    from mvc_mvu.messages import make_message as _mmake
+                    import mvu.main_mvu as _m_main
+                    main_window.mvu_adapter.dispatch(_mmake(_m_main.Msg.SET_ROTATION, angle=final_rotation))
+                    print(f"DEBUG: 📤 Dispatched MVU SET_ROTATION final {final_rotation:.1f}° on release")
+                except Exception as _e:
+                    print(f"DEBUG: ❌ Failed to dispatch MVU final rotation: {_e}")
+            # Set a brief cooldown to prevent MVU applying stale model rotation (e.g., 0°) immediately
+            try:
+                setattr(self, 'rotation_sync_skip_frames', 2)
+            except Exception:
+                pass
         except Exception as e:
             print(f"DEBUG: ❌ Error updating final rotation field: {e}")
         
@@ -5602,7 +5666,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         """Handle rotate tool mouse motion."""
 
         print(f"DEBUG: 🔄 handle_rotate_motion called with dragging_rotation={getattr(self, 'dragging_rotation', False)}")
-        
+
         if hasattr(self, 'dragging_rotation') and self.dragging_rotation and hasattr(self, 'rotation_start_angle'):
             # For world rotation, ALWAYS use screen center as rotation point
             size = self.GetSize()
@@ -5636,6 +5700,15 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                     print(f"DEBUG: 🔄 Updated UI rotation field to {new_rotation:.1f}°")
                 else:
                     print(f"DEBUG: ❌ rotation_field not found in main window")
+                # Also sync MVU model so all paths see the same rotation
+                if hasattr(main_window, 'mvu_adapter'):
+                    try:
+                        from mvc_mvu.messages import make_message as _mmake
+                        import mvu.main_mvu as _m_main
+                        main_window.mvu_adapter.dispatch(_mmake(_m_main.Msg.SET_ROTATION, angle=new_rotation))
+                        print(f"DEBUG: 📤 Dispatched MVU SET_ROTATION {new_rotation:.1f}°")
+                    except Exception as _e:
+                        print(f"DEBUG: ❌ Failed to dispatch MVU rotation: {_e}")
             except Exception as e:
                 print(f"DEBUG: ❌ Error updating rotation field: {e}")
         else:
@@ -6388,18 +6461,21 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
     def handle_edge_creation_start(self, pos):
         """Handle edge creation start."""
 
+        print(f"DEBUG: 🟢 handle_edge_creation_start at ({pos.x}, {pos.y})")
         # First check if we're starting from a connection point
         connection_info = self.get_connection_point_at_position(pos.x, pos.y)
         if connection_info:
             edge, point_type, node_id = connection_info
             self.edge_start_node = self.graph.get_node(node_id)
             self.edge_start_connection = (edge, point_type)
+            print(f"DEBUG: 🟢 start from connection point on node {node_id} ({point_type})")
         else:
             # Regular edge creation
             node = self.get_node_at_position(pos.x, pos.y)
         if node:
             self.edge_start_node = node
             self.edge_start_connection = None
+            print(f"DEBUG: 🟢 start from node {node.id}")
             if self.edge_rendering_type == "freeform":
                 # Create temporary edge for preview
                 self.temp_edge = m_edge.Edge(source_id=node.id, target_id=node.id)
@@ -6407,9 +6483,28 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 # Convert screen coordinates to world coordinates for start point
                 world_pos = self.screen_to_world(pos.x, pos.y)
                 self.temp_path_points = [(world_pos[0], world_pos[1], 0.0)]  # Start point
+        else:
+            print("DEBUG: 🟡 No start node under cursor for edge start")
 
     def handle_edge_creation_end(self, pos):
         """Handle edge creation end."""
+
+        # Fallback: if start node was not captured on mouse down, try to latch it on mouse up
+        if not self.edge_start_node:
+            start_node = self.get_node_at_position(pos.x, pos.y)
+            if start_node:
+                self.edge_start_node = start_node
+                self.edge_start_connection = None
+                # If freeform, seed a temp edge and starting point in world coordinates
+                if self.edge_rendering_type == "freeform":
+                    self.temp_edge = m_edge.Edge(source_id=start_node.id, target_id=start_node.id)
+                    self.temp_edge.rendering_type = "freeform"
+                    world_pos = self.screen_to_world(pos.x, pos.y)
+                    self.temp_path_points = [(world_pos[0], world_pos[1], 0.0)]
+                print(f"DEBUG: 🟡 Edge start latched on mouse up at node {start_node.id}")
+            else:
+                print("DEBUG: 🟡 Edge start not found on mouse up - click directly on a node to start")
+            return
 
         if self.edge_start_node:
             # Check if we're ending on a connection point
@@ -6417,6 +6512,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             if connection_info:
                 # Ending on a connection point
                 edge, point_type, node_id = connection_info
+                print(f"DEBUG: 🔵 end on connection point for node {node_id} ({point_type})")
                 if point_type == 'from':
                     edge.add_from_node(self.edge_start_node.id)
                 else:  # 'to'
@@ -6433,6 +6529,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 # Check if we're starting from a connection point
                 target_node = self.get_node_at_position(pos.x, pos.y)
             if target_node:  # Allow self-loops by removing the != check
+                print(f"DEBUG: 🔵 end on node {target_node.id}")
                 if self.edge_start_connection:
                     # Starting from a connection point
                     edge, point_type = self.edge_start_connection
@@ -6497,6 +6594,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
 
                 # Initialize control points for the new edge
                 self.initialize_control_points(edge, self.edge_start_node, target_node)
+                print(f"DEBUG: ✅ Created edge {edge.id} from {self.edge_start_node.id} to {target_node.id}")
                 
                 # Execute command
                 if self.undo_redo_manager:
@@ -6508,6 +6606,8 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
 
                 self.graph_modified.emit()
                 self.Refresh()
+            else:
+                print("DEBUG: 🟡 No target node under cursor for edge end")
 
         self.edge_start_node = None
 

@@ -4,6 +4,7 @@ Drawer for drawing the graph canvas.
 
 
 import math
+from contextlib import contextmanager
 import wx
 
 # Handle imports for both module and direct execution
@@ -132,12 +133,15 @@ def draw_selection_rect(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
     restore_state = False
     gc = dc.GetGraphicsContext() if hasattr(dc, 'GetGraphicsContext') else None
     if gc:
-        gc.PopState()
-        restore_state = True
+        try:
+            gc.PopState()
+            restore_state = True
+        except Exception:
+            restore_state = False
 
     # Create selection rectangle style (screen space)
-    dc.SetPen(wx.Pen(wx.Colour(0, 120, 215), 1, wx.PENSTYLE_SOLID))
-    dc.SetBrush(wx.Brush(wx.Colour(0, 120, 215, 32)))
+    dc.SetPen(wx.Pen(wx.Colour(0, 120, 215), 2, wx.PENSTYLE_SOLID))
+    dc.SetBrush(wx.Brush(wx.Colour(0, 120, 215, 96)))
 
     # Draw rectangle in screen coordinates
     rect = graph_canvas.selection_rect
@@ -411,10 +415,42 @@ def draw_element_rotation_center_dot(graph_canvas: "m_graph_canvas.GraphCanvas",
 
 
 def on_paint(graph_canvas: "m_graph_canvas.GraphCanvas", event):
-    """Handle paint events."""
+    """Handle paint events. If MVU adapter is present, route through MVU-aware draw."""
 
     dc = wx.PaintDC(graph_canvas)
-    draw(graph_canvas, dc)
+    model = None
+    try:
+        main_window = getattr(graph_canvas, 'main_window', None)
+        if main_window is not None and hasattr(main_window, 'mvu_adapter'):
+            model = main_window.mvu_adapter.model
+    except Exception:
+        model = None
+
+    if model is not None:
+        draw_mvu(graph_canvas, dc, model)
+    else:
+        draw(graph_canvas, dc)
+
+
+@contextmanager
+def world_transform(gc, graph_canvas: "m_graph_canvas.GraphCanvas"):
+    """Context manager to apply the unified world transform.
+
+    Order (effective on points): Scale -> Rotate -> Translate(center + pan).
+    """
+    gc.PushState()
+    try:
+        size = graph_canvas.GetSize()
+        center_x = size.width / 2.0
+        center_y = size.height / 2.0
+        # Align with desired world_to_screen transform: Translate(center+pan) -> Rotate -> Scale
+        gc.Translate(center_x + graph_canvas.pan_x, center_y + graph_canvas.pan_y)
+        if graph_canvas.world_rotation != 0.0:
+            gc.Rotate(math.radians(graph_canvas.world_rotation))
+        gc.Scale(graph_canvas.zoom, graph_canvas.zoom)
+        yield
+    finally:
+        gc.PopState()
 
 
 def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
@@ -464,21 +500,12 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
             return
         print("DEBUG: Got graphics context")
         
-        # Push state for global transforms
+        # Apply unified world transform for world-space drawing
         gc.PushState()
         state_pushed = True
         print("DEBUG: Pushed initial state")
-        
-        # New transform pipeline: Translate(center + offset) -> Scale -> Rotate
-        size = graph_canvas.GetSize()
-        center_x = size.width / 2.0
-        center_y = size.height / 2.0
-        # Offset corresponds to pan_x, pan_y in screen units
-        gc.Translate(center_x + graph_canvas.pan_x, center_y + graph_canvas.pan_y)
-        gc.Scale(graph_canvas.zoom, graph_canvas.zoom)
-        if graph_canvas.world_rotation != 0.0:
-            gc.Rotate(math.radians(graph_canvas.world_rotation))
-        print(f"DEBUG: Applied Translate({center_x + graph_canvas.pan_x:.1f}, {center_y + graph_canvas.pan_y:.1f}) then Scale({graph_canvas.zoom:.6f}) then Rotate({graph_canvas.world_rotation}°)")
+        with world_transform(gc, graph_canvas):
+            print(f"DEBUG: Applied world_transform: pan=({graph_canvas.pan_x:.1f},{graph_canvas.pan_y:.1f}) zoom={graph_canvas.zoom:.6f} rot={graph_canvas.world_rotation}°")
         
         # Draw checkboard background if enabled (AFTER rotation so it rotates with world)
         if graph_canvas.checkerboard_background:
@@ -515,16 +542,23 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
         print(f"DEBUG: Grid check - style: '{graph_canvas.grid_style}', spacing: {graph_canvas.grid_spacing}")
         if graph_canvas.grid_style != "none":
             print("DEBUG: Grid enabled, drawing with proper bounds calculation")
-            draw_grid(graph_canvas, dc)
+            draw_grid(graph_canvas, dc, gc)
             print("DEBUG: Called draw_grid")
         else:
             print("DEBUG: Grid disabled (style is 'none')")
         
+        # Duplicate checkerboard and grid drawing removed; handled inside world transform above
+        
         # Draw zoom center crosshair for zoom feedback in SCREEN coordinates (stays at zoom center)
         if hasattr(graph_canvas, 'current_mouse_pos') and graph_canvas.current_mouse_pos:
-            # Pop the world transformation state to draw in screen coordinates
-            gc.PopState()  # Pop the world transformation state
-            gc.PushState()  # Push a new state for screen coordinates
+            # Ensure we are in screen space for the crosshair
+            if state_pushed:
+                try:
+                    gc.PopState()
+                    state_pushed = False
+                except Exception as e:
+                    print(f"DEBUG: Could not pop world state before crosshair: {e}")
+            gc.PushState()
             
             # Use locked zoom center if available, otherwise use current mouse position
             if hasattr(graph_canvas, 'zoom_center_locked') and graph_canvas.zoom_center_locked and graph_canvas.zoom_center_screen_pos:
@@ -560,77 +594,36 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
             dc.DrawCircle(int(zoom_center_screen[0]), int(zoom_center_screen[1]), 5)
             print(f"DEBUG: Drew zoom center crosshair at SCREEN position ({zoom_center_screen[0]}, {zoom_center_screen[1]}) - {'locked' if hasattr(graph_canvas, 'zoom_center_locked') and graph_canvas.zoom_center_locked else 'current'}")
             
-            # Restore the world transformation state for the rest of the drawing
-            gc.PopState()  # Pop the screen coordinate state
-            gc.PushState()  # Push back the world transformation state
-            # Apply Scale then Translate to stay consistent with world_to_screen
-            gc.Scale(graph_canvas.zoom, graph_canvas.zoom)
-            gc.Translate(graph_canvas.pan_x, graph_canvas.pan_y)
-            
-            # Apply world rotation transformation if needed
-            if graph_canvas.world_rotation != 0.0:
-                size = graph_canvas.GetSize()
-                screen_center_x = size.width / 2.0
-                screen_center_y = size.height / 2.0
-                transformed_center_x = (screen_center_x - graph_canvas.pan_x) / graph_canvas.zoom
-                transformed_center_y = (screen_center_y - graph_canvas.pan_y) / graph_canvas.zoom
-                gc.Translate(transformed_center_x, transformed_center_y)
-                gc.Rotate(math.radians(graph_canvas.world_rotation))
-                gc.Translate(-transformed_center_x, -transformed_center_y)
+            # Done with crosshair; nothing to restore here as edges will manage their own state
+            gc.PopState()
 
         # Draw edges first (so they appear behind nodes, only visible ones)
         # Edges are drawn in SCREEN coordinates; temporarily exit world transforms
-        edges_restore_state = False
-        if gc:
-            try:
-                gc.PopState()
-                edges_restore_state = True
-            except Exception as e:
-                print(f"DEBUG: Could not pop state for edges: {e}")
+        # Edges are drawn in SCREEN coordinates; no world transform applied
 
+        # Draw edges in world coordinates under the unified transform
         edge_count = 0
-        for edge in graph_canvas.graph.get_all_edges():
-            if hasattr(edge, 'visible') and edge.visible:
-                draw_edge(graph_canvas, dc, edge)
-                edge_count += 1
-            elif not hasattr(edge, 'visible'):
-                # Default to visible if no visible property
-                draw_edge(graph_canvas, dc, edge)
-                edge_count += 1
-        print(f"DEBUG: Drew {edge_count} edges")
+        with world_transform(gc, graph_canvas):
+            for edge in graph_canvas.graph.get_all_edges():
+                if hasattr(edge, 'visible') and edge.visible:
+                    draw_edge(graph_canvas, dc, edge)
+                    edge_count += 1
+                elif not hasattr(edge, 'visible'):
+                    # Default to visible if no visible property
+                    draw_edge(graph_canvas, dc, edge)
+                    edge_count += 1
+            print(f"DEBUG: Drew {edge_count} edges")
 
-        # Restore world transforms for subsequent world-space drawing
-        if edges_restore_state and gc:
-            try:
-                gc.PushState()
-                # Apply Scale then Translate to match world_to_screen
-                gc.Scale(graph_canvas.zoom, graph_canvas.zoom)
-                gc.Translate(graph_canvas.pan_x, graph_canvas.pan_y)
-                # Apply world rotation if any
-                if graph_canvas.world_rotation != 0.0:
-                    size = graph_canvas.GetSize()
-                    screen_center_x = size.width / 2.0
-                    screen_center_y = size.height / 2.0
-                    transformed_center_x = (screen_center_x - graph_canvas.pan_x) / graph_canvas.zoom
-                    transformed_center_y = (screen_center_y - graph_canvas.pan_y) / graph_canvas.zoom
-                    gc.Translate(transformed_center_x, transformed_center_y)
-                    gc.Rotate(math.radians(graph_canvas.world_rotation))
-                    gc.Translate(-transformed_center_x, -transformed_center_y)
-            except Exception as e:
-                print(f"DEBUG: Could not restore state after edges: {e}")
-
-        # Draw nodes (only visible ones)
+        # Draw nodes (only visible ones) under world transform
         visible_count = 0
         total_count = 0
-        for node in graph_canvas.graph.get_all_nodes():
-            total_count += 1
-            if node.visible:
-                visible_count += 1
-                draw_node(graph_canvas, dc, node)
-                # Draw anchor points if enabled
-                if graph_canvas.show_anchor_points:
-                    graph_canvas.draw_node_anchor_points(dc, node)
-        print(f"DEBUG: Drew {visible_count}/{total_count} nodes")
+        with world_transform(gc, graph_canvas):
+            for node in graph_canvas.graph.get_all_nodes():
+                total_count += 1
+                if node.visible:
+                    visible_count += 1
+                    draw_node(graph_canvas, dc, node)
+            print(f"DEBUG: Drew {visible_count}/{total_count} nodes")
         
         # Debug: Report if any nodes are invisible
         if visible_count < total_count:
@@ -720,7 +713,64 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
                 state_pushed = False
 
 
-def draw_grid(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
+def draw_mvu(graph_canvas: "m_graph_canvas.GraphCanvas", dc, model):
+    """MVU-aware drawing. Ensures canvas reflects MVU model before delegating to draw()."""
+    try:
+        # Keep canvas rotation in sync with MVU model
+        if hasattr(model, 'rotation_deg') and hasattr(graph_canvas, 'set_world_rotation'):
+            try:
+                # Do not override interactive rotation while dragging via tool
+                dragging = bool(getattr(graph_canvas, 'dragging_rotation', False))
+                # Optionally skip a couple frames after release if requested by canvas
+                skip_frames = int(getattr(graph_canvas, 'rotation_sync_skip_frames', 0) or 0)
+                current_rot = float(getattr(graph_canvas, 'world_rotation', 0.0) or 0.0)
+                new_rot = float(model.rotation_deg)
+                if skip_frames > 0:
+                    try:
+                        setattr(graph_canvas, 'rotation_sync_skip_frames', skip_frames - 1)
+                    except Exception:
+                        pass
+                elif not dragging and abs(current_rot - new_rot) > 1e-9:
+                    # If model looks stale (e.g., 0) but canvas has a meaningful angle, prefer canvas -> model
+                    if abs(current_rot) > 1e-6 and abs(new_rot) < 1e-6:
+                        try:
+                            mw = getattr(graph_canvas, 'main_window', None) or graph_canvas.GetParent().GetParent()
+                            if hasattr(mw, 'mvu_adapter'):
+                                from mvc_mvu.messages import make_message
+                                import mvu.main_mvu as m_main_mvu
+                                mw.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ROTATION, angle=current_rot))
+                                print(f"DEBUG: draw_mvu reconciled model rotation -> {current_rot}°")
+                        except Exception:
+                            pass
+                    else:
+                        graph_canvas.set_world_rotation(new_rot)
+            except Exception:
+                pass
+
+        # Grid visibility
+        if hasattr(model, 'grid_visible'):
+            try:
+                graph_canvas.grid_style = 'grid' if bool(model.grid_visible) else 'none'
+            except Exception:
+                pass
+
+        # Snapping
+        if hasattr(model, 'snap_enabled'):
+            try:
+                enabled = bool(model.snap_enabled)
+                if hasattr(graph_canvas, 'grid_snapping_enabled'):
+                    graph_canvas.grid_snapping_enabled = enabled
+                if hasattr(graph_canvas, 'snap_to_grid'):
+                    graph_canvas.snap_to_grid = enabled
+            except Exception:
+                pass
+    except Exception:
+        # Non-fatal pre-sync issues shouldn't block drawing
+        pass
+
+    draw(graph_canvas, dc)
+
+def draw_grid(graph_canvas: "m_graph_canvas.GraphCanvas", dc, gc):
     """Draw the grid or dots based on the current style."""
     print(f"DEBUG: ===== DRAW_GRID START =====")
     print(f"DEBUG: Grid style: '{graph_canvas.grid_style}'")
@@ -760,7 +810,7 @@ def draw_grid(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
     dc.SetBrush(brush)
     print(f"DEBUG: Set brush with color {grid_color}")
 
-    # Now grid draws in world coordinates, so it transforms with world rotation/pan
+    # Grid draws in world coordinates, so it transforms with world rotation/pan
     world_spacing = graph_canvas.grid_spacing
     
     print(f"DEBUG: Drawing grid in world coordinates with spacing {world_spacing}")
@@ -2184,9 +2234,92 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
     if not source_node or not target_node:
         return
 
-    # Get screen positions
-    source_screen = graph_canvas.world_to_screen(source_node.x, source_node.y)
-    target_screen = graph_canvas.world_to_screen(target_node.x, target_node.y)
+    gc = dc.GetGraphicsContext() if hasattr(dc, 'GetGraphicsContext') else None
+    # Prefer world-coordinate drawing via GC when available (unified transform)
+    if gc:
+        try:
+            # Compute anchor endpoints in world space if helper available; else use node centers
+            if hasattr(graph_canvas, 'get_edge_anchor_endpoints_world'):
+                source_anchor_world, target_anchor_world = graph_canvas.get_edge_anchor_endpoints_world(edge, source_node, target_node)
+                sxw, syw = source_anchor_world
+                txw, tyw = target_anchor_world
+            else:
+                sxw, syw = source_node.x, source_node.y
+                txw, tyw = target_node.x, target_node.y
+
+            # Set pen using world units (transform handles zoom)
+            if edge.selected:
+                color = wx.Colour(255, 50, 50)
+            else:
+                color = wx.Colour(*edge.color)
+            gc.SetPen(wx.Pen(color, max(1, int(edge.width))))
+
+            # Draw straight path for now (respects rotation/pan/zoom under world_transform)
+            path = gc.CreatePath()
+            path.MoveToPoint(sxw, syw)
+            path.AddLineToPoint(txw, tyw)
+            gc.StrokePath(path)
+
+            # Draw arrowhead in world coordinates if directed
+            if getattr(edge, 'directed', True):
+                dx = (txw - sxw)
+                dy = (tyw - syw)
+                seg_len = math.hypot(dx, dy)
+                if seg_len > 1e-6:
+                    ux = dx / seg_len
+                    uy = dy / seg_len
+                    # Arrow position normalized (clamped to avoid clipping at ends)
+                    arrow_pos = getattr(edge, 'arrow_position', 0.5)
+                    arrow_pos = max(0.1, min(0.9, arrow_pos))
+                    ax = sxw + ux * seg_len * arrow_pos
+                    ay = syw + uy * seg_len * arrow_pos
+
+                    # Arrow size in world units; scale with edge width
+                    arrow_size = max(8.0, float(edge.width) * 3.0) / max(1.0, 1.0)  # world units; transform scales visually
+                    arrow_width = arrow_size * 0.5
+
+                    # Perpendicular
+                    px = -uy
+                    py = ux
+
+                    # Build arrow polygon path (tip, back-left, mid, back-right)
+                    apath = gc.CreatePath()
+                    tip_x = ax
+                    tip_y = ay
+                    bl_x = ax - arrow_size * ux + arrow_width * px
+                    bl_y = ay - arrow_size * uy + arrow_width * py
+                    mid_x = ax - (arrow_size * 0.5) * ux
+                    mid_y = ay - (arrow_size * 0.5) * uy
+                    br_x = ax - arrow_size * ux - arrow_width * px
+                    br_y = ay - arrow_size * uy - arrow_width * py
+                    apath.MoveToPoint(tip_x, tip_y)
+                    apath.AddLineToPoint(bl_x, bl_y)
+                    apath.AddLineToPoint(mid_x, mid_y)
+                    apath.AddLineToPoint(br_x, br_y)
+                    apath.CloseSubpath()
+
+                    gc.SetBrush(wx.Brush(color))
+                    gc.SetPen(wx.Pen(color, 1))
+                    gc.FillPath(apath)
+                    gc.StrokePath(apath)
+
+                    # Draw draggable yellow control dot at arrow center
+                    ctrl_r = max(3.0, min(8.0, float(edge.width) * 1.5))
+                    gc.SetBrush(wx.Brush(wx.Colour(255, 255, 0)))
+                    gc.SetPen(wx.Pen(wx.Colour(0, 0, 0), 1))
+                    gc.DrawEllipse(ax - ctrl_r, ay - ctrl_r, ctrl_r * 2.0, ctrl_r * 2.0)
+
+            # Draw label at midpoint in world coords
+            if graph_canvas.show_edge_labels and edge.text and graph_canvas.zoom > 0.5:
+                mxw = (sxw + txw) / 2.0
+                myw = (syw + tyw) / 2.0
+                gc.SetFont(wx.Font(max(8, int(edge.font_size)), wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD), wx.Colour(0, 0, 0))
+                gc.DrawText(edge.text, mxw, myw)
+
+            return
+        except Exception as _e:
+            # Fallback to screen-space method below
+            pass
 
     # Set colors
     if edge.selected:
@@ -2194,15 +2327,11 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
     else:
         color = wx.Colour(*edge.color)
 
-    # Calculate proper line endpoints to avoid overlapping with nodes
-    source_adjusted = graph_canvas.calculate_line_endpoint(source_node,
-                                                    target_node,
-                                                    source_screen,
-                                                    target_screen, True, edge)
-    target_adjusted = graph_canvas.calculate_line_endpoint(target_node,
-                                                    source_node,
-                                                    target_screen,
-                                                    source_screen, False, edge)
+    # Fallback path: screen-space drawing
+    source_screen = graph_canvas.world_to_screen(source_node.x, source_node.y)
+    target_screen = graph_canvas.world_to_screen(target_node.x, target_node.y)
+    source_adjusted = graph_canvas.calculate_line_endpoint(source_node, target_node, source_screen, target_screen, True, edge)
+    target_adjusted = graph_canvas.calculate_line_endpoint(target_node, source_node, target_screen, source_screen, False, edge)
 
     # Draw edge line - always solid, arrows will indicate direction
     dc.SetPen(

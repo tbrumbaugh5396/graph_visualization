@@ -550,6 +550,24 @@ def setup_sidebar(main_window: "m_main_window.MainWindow"):
     movement_sizer.Add(zoom_sensitivity_sizer, 0, wx.EXPAND | wx.ALL,
                             2)
     
+    # Zoom input mode (Wheel vs Touchpad)
+    zoom_input_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    zoom_input_label = wx.StaticText(movement_panel, label="Zoom Input:")
+    zoom_input_label.SetForegroundColour(wx.Colour(0, 0, 0))
+    main_window.zoom_input_choice = wx.Choice(movement_panel, choices=["Wheel", "Touchpad"])
+    try:
+        default_mode = "Wheel"
+        if hasattr(main_window, 'mvu_adapter'):
+            m = main_window.mvu_adapter.model
+            default_mode = "Touchpad" if getattr(m, 'zoom_input_mode', 'wheel') == 'touchpad' else "Wheel"
+        main_window.zoom_input_choice.SetStringSelection(default_mode)
+    except Exception:
+        main_window.zoom_input_choice.SetStringSelection("Wheel")
+    main_window.zoom_input_choice.Bind(wx.EVT_CHOICE, lambda evt: m_sidebar_event_handler._on_zoom_input_mode_changed(main_window, evt))
+    zoom_input_sizer.Add(zoom_input_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+    zoom_input_sizer.Add(main_window.zoom_input_choice, 0, wx.ALIGN_CENTER_VERTICAL)
+    movement_sizer.Add(zoom_input_sizer, 0, wx.EXPAND | wx.ALL, 2)
+    
     # Set the sizer for the movement panel
     movement_panel.SetSizer(movement_sizer)
 

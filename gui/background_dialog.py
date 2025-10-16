@@ -445,16 +445,22 @@ class BackgroundDialog(wx.Dialog):
                 return
                 
             path = dialog.GetPath()
-            if self.selected_layer.load_image(path):
-                self.img_path.SetValue(path)
-                try:
-                    main_window = self.GetParent()
-                    if hasattr(main_window, 'mvu_adapter'):
+            try:
+                main_window = self.GetParent()
+                if hasattr(main_window, 'mvu_adapter'):
+                    # Dispatch async image load to MVU
+                    index = self.background_manager.layers.index(self.selected_layer) if self.selected_layer in self.background_manager.layers else -1
+                    if index >= 0:
                         from mvc_mvu.messages import make_message
                         import mvu.main_mvu as m_main_mvu
-                        main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_UPDATE))
-                except Exception:
-                    pass
+                        main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.BG_LOAD_IMAGE, index=index, path=path))
+                        self.img_path.SetValue(path)
+                        return
+            except Exception:
+                pass
+            # Fallback: direct load
+            if self.selected_layer.load_image(path):
+                self.img_path.SetValue(path)
                 
     def on_mode_changed(self, event):
         """Handle display mode change."""

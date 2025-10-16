@@ -9,6 +9,7 @@ from utils.managers.clipboard_manager import ClipboardManager
 from utils.managers.layout_manager import LayoutManager
 from utils.managers.file_manager import FileManager
 from utils.managers.theme_manager import ThemeManager
+from utils.managers.zoom_manager import ZoomManager
 
 
 class AppManagers:
@@ -20,6 +21,7 @@ class AppManagers:
         self.file_manager = FileManager(main_window)
         self.hotkey_manager = HotkeyManager(main_window)
         self.theme_manager = ThemeManager()
+        self.zoom_manager = ZoomManager()
 
         # Ensure a default theme is set and expose theme database on main_window
         if not self.theme_manager.get_current_theme():

@@ -1193,6 +1193,11 @@ def on_zoom_sensitivity_changed(main_window: "m_main_window.MainWindow", event):
         if hasattr(main_window, 'mvu_adapter'):
             from mvc_mvu.messages import make_message
             import mvu.main_mvu as m_main_mvu
+            # Persist via ZoomManager
+            try:
+                main_window.managers.zoom_manager.set_sensitivity(main_window.zoom_sensitivity_field.GetValue())
+            except Exception:
+                pass
             main_window.mvu_adapter.dispatch(make_message(
                 m_main_mvu.Msg.SET_ZOOM_SENSITIVITY,
                 value=main_window.zoom_sensitivity_field.GetValue()
@@ -1201,6 +1206,28 @@ def on_zoom_sensitivity_changed(main_window: "m_main_window.MainWindow", event):
     except Exception:
         pass
     main_window.update_canvas_zoom_sensitivity()
+
+
+def _on_zoom_input_mode_changed(main_window: "m_main_window.MainWindow", event):
+    """Handle zoom input mode choice (Wheel vs Touchpad)."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            label = main_window.zoom_input_choice.GetStringSelection()
+            mode = 'touchpad' if label.lower() == 'touchpad' else 'wheel'
+            try:
+                print(f"DEBUG: Sidebar zoom input mode changed -> {mode}")
+            except Exception:
+                pass
+            # Persist via ZoomManager
+            try:
+                main_window.managers.zoom_manager.set_mode(mode)
+            except Exception:
+                pass
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ZOOM_INPUT_MODE, mode=mode))
+    except Exception:
+        pass
 
 
 def update_canvas_sensitivity(main_window: "m_main_window.MainWindow"):

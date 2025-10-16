@@ -311,6 +311,16 @@ class MainWindow(wx.Frame):
                 self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_MOVE_SENSITIVITY, x=move_x, y=move_y, inverted=inverted))
                 zoom_sens = getattr(self, 'zoom_sensitivity_field', None).GetValue() if hasattr(self, 'zoom_sensitivity_field') else 1.0
                 self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ZOOM_SENSITIVITY, value=zoom_sens))
+                # Persisted zoom input mode and sensitivity via ZoomManager
+                try:
+                    zm = self.managers.zoom_manager
+                    # Mode first
+                    self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ZOOM_INPUT_MODE, mode=zm.get_mode()))
+                    # Sensitivity override if no UI value yet
+                    if not hasattr(self, 'zoom_sensitivity_field'):
+                        self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ZOOM_SENSITIVITY, value=zm.get_sensitivity()))
+                except Exception:
+                    pass
                 rotation = getattr(self, 'rotation_field', None).GetValue() if hasattr(self, 'rotation_field') else 0.0
                 self.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ROTATION, angle=rotation))
             except Exception:
@@ -747,10 +757,10 @@ class MainWindow(wx.Frame):
                 old_color = self.canvas.grid_color
                 # Create and execute command (legacy fallback)
                 command = ChangeColorCommand(self.canvas, 'grid', old_color, rgb_tuple)
-                self.managers.undo_redo_manager.execute_command(command)
-                # Update the button to show the selected color
-                self.grid_color_btn.SetBackgroundColour(new_color)
-                print(f"DEBUG: Grid color changed to RGB{rgb_tuple}")
+            self.managers.undo_redo_manager.execute_command(command)
+            # Update the button to show the selected color
+            self.grid_color_btn.SetBackgroundColour(new_color)
+            print(f"DEBUG: Grid color changed to RGB{rgb_tuple}")
         color_dialog.Destroy()
 
 

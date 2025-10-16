@@ -318,11 +318,25 @@ def update_undo_redo_ui(main_window: "MainWindow"):
 
 def on_copy_selected(main_window: "MainWindow", event):
     """Copy selected items to clipboard."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.CLIPBOARD_COPY))
+    except Exception:
+        pass
     main_window.managers.clipboard_manager.copy_selection(main_window.current_graph)
 
 
 def on_cut_selected(main_window: "MainWindow", event):
     """Cut selected items (copy then delete)."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.CLIPBOARD_CUT))
+    except Exception:
+        pass
     main_window.managers.clipboard_manager.cut_selection(main_window.current_graph, main_window.managers.undo_redo_manager)
     main_window.update_ui()
     main_window.canvas.Refresh()
@@ -330,6 +344,13 @@ def on_cut_selected(main_window: "MainWindow", event):
 
 def on_paste_selected(main_window: "MainWindow", event):
     """Paste items from clipboard."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.CLIPBOARD_PASTE))
+    except Exception:
+        pass
     main_window.managers.clipboard_manager.paste_selection(main_window.current_graph, main_window.managers.undo_redo_manager)
     main_window.update_ui()
     main_window.canvas.Refresh()
@@ -451,21 +472,53 @@ def on_toggle_snap(main_window: "MainWindow", event):
 # Layout menu handlers
 def on_layout_spring(main_window: "MainWindow", event):
     """Apply spring layout."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.LAYOUT_APPLY, name='spring'))
+            return
+    except Exception:
+        pass
     main_window.canvas.apply_spring_layout()
 
 
 def on_layout_circular(main_window: "MainWindow", event):
     """Apply circular layout."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.LAYOUT_APPLY, name='circle'))
+            return
+    except Exception:
+        pass
     main_window.canvas.apply_circular_layout()
 
 
 def on_layout_hierarchical(main_window: "MainWindow", event):
     """Apply hierarchical layout."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.LAYOUT_APPLY, name='tree'))
+            return
+    except Exception:
+        pass
     main_window.canvas.apply_hierarchical_layout()
 
 
 def on_layout_force_directed(main_window: "MainWindow", event):
     """Apply force-directed layout."""
+    try:
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.LAYOUT_APPLY, name='spring'))
+            return
+    except Exception:
+        pass
     main_window.canvas.apply_force_directed_layout()
 
 
@@ -581,16 +634,34 @@ def on_properties(main_window: "MainWindow", event):
         node = selected_nodes[0]
         dialog = wx.TextEntryDialog(main_window, "Enter node text:", "Edit Node", node.text)
         if dialog.ShowModal() == wx.ID_OK:
-            node.text = dialog.GetValue()
-            main_window.canvas.Refresh()
+            try:
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_NODE_TEXT, node_id=node.id, text=dialog.GetValue()))
+                else:
+                    node.text = dialog.GetValue()
+                    main_window.canvas.Refresh()
+            except Exception:
+                node.text = dialog.GetValue()
+                main_window.canvas.Refresh()
         dialog.Destroy()
     elif len(selected_edges) == 1 and not selected_nodes:
         # Single edge selected
         edge = selected_edges[0]
         dialog = wx.TextEntryDialog(main_window, "Enter edge text:", "Edit Edge", edge.text)
         if dialog.ShowModal() == wx.ID_OK:
-            edge.text = dialog.GetValue()
-            main_window.canvas.Refresh()
+            try:
+                if hasattr(main_window, 'mvu_adapter'):
+                    from mvc_mvu.messages import make_message
+                    import mvu.main_mvu as m_main_mvu
+                    main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_EDGE_TEXT, edge_id=edge.id, text=dialog.GetValue()))
+                else:
+                    edge.text = dialog.GetValue()
+                    main_window.canvas.Refresh()
+            except Exception:
+                edge.text = dialog.GetValue()
+                main_window.canvas.Refresh()
         dialog.Destroy()
     else:
         wx.MessageBox(

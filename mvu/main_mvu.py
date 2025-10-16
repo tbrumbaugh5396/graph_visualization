@@ -7,7 +7,7 @@ from mvc_mvu.core import UpdateResult
 from mvc_mvu.messages import MessageEnum, make_message, get_msg_type, get_msg_data
 from mvc_mvu.effects import Commands
 from mvc_mvu.mvc_adapter import UIState
-from . import file_mvu, theme_mvu, view_mvu, canvas_mvu, status_mvu, background_mvu
+from . import file_mvu, theme_mvu, view_mvu, canvas_mvu, status_mvu, background_mvu, clipboard_mvu
 
 
 @dataclass
@@ -42,11 +42,22 @@ class AppModel(Model):
     move_inverted: bool = False
     zoom_sensitivity: float = 1.0
     rotation_deg: float = 0.0
+    zoom_input_mode: str = "wheel"  # 'wheel' or 'touchpad'
     # Background updates sequence
     bg_seq: int = 0
     bg_image_seq: int = 0
     bg_last_load_path: Optional[str] = None
     bg_last_load_index: int = -1
+    # Layout
+    layout_seq: int = 0
+    last_layout_name: Optional[str] = None
+    # Property edits
+    node_text_seq: int = 0
+    last_node_text_id: Optional[str] = None
+    last_node_text_value: Optional[str] = None
+    edge_text_seq: int = 0
+    last_edge_text_id: Optional[str] = None
+    last_edge_text_value: Optional[str] = None
 
 
 class Msg(MessageEnum):
@@ -78,9 +89,21 @@ class Msg(MessageEnum):
     SET_MOVE_SENSITIVITY = ("SET_MOVE_SENSITIVITY", "x", "y", "inverted")
     SET_ZOOM_SENSITIVITY = ("SET_ZOOM_SENSITIVITY", "value")
     SET_ROTATION = ("SET_ROTATION", "angle")
+    SET_ZOOM_INPUT_MODE = ("SET_ZOOM_INPUT_MODE", "mode")
     # Background
     BG_UPDATE = ("BG_UPDATE",)
     BG_LOAD_IMAGE = ("BG_LOAD_IMAGE", "index", "path")
+    BG_IMAGE_LOADED = ("BG_IMAGE_LOADED", "index", "path")
+    BG_IMAGE_ERROR = ("BG_IMAGE_ERROR", "index", "error")
+    # Layout
+    LAYOUT_APPLY = ("LAYOUT_APPLY", "name")
+    # Properties
+    SET_NODE_TEXT = ("SET_NODE_TEXT", "node_id", "text")
+    SET_EDGE_TEXT = ("SET_EDGE_TEXT", "edge_id", "text")
+    # Clipboard
+    CLIPBOARD_COPY = ("CLIPBOARD_COPY",)
+    CLIPBOARD_CUT = ("CLIPBOARD_CUT",)
+    CLIPBOARD_PASTE = ("CLIPBOARD_PASTE",)
 
 
 def initial_model_fn(
@@ -102,7 +125,7 @@ def update_fn(message: Any, model: AppModel) -> UpdateResult[AppModel]:
     d = get_msg_data(message)
 
     # Delegate to modular handlers first
-    for mod in (file_mvu, theme_mvu, view_mvu, canvas_mvu, status_mvu, background_mvu):
+    for mod in (file_mvu, theme_mvu, view_mvu, canvas_mvu, status_mvu, background_mvu, clipboard_mvu):
         try:
             res = mod.update(t, d, model)
             if res is not None:
@@ -207,16 +230,60 @@ def update_fn(message: Any, model: AppModel) -> UpdateResult[AppModel]:
     if t == Msg.SET_ROTATION:
         return UpdateResult(model=replace(model, rotation_deg=float(d["angle"])) )
 
+    if t == Msg.SET_ZOOM_INPUT_MODE:
+        mode = str(d["mode"]).lower()
+        if mode not in ("wheel", "touchpad"):
+            mode = "wheel"
+        try:
+            print(f"DEBUG: MVU update SET_ZOOM_INPUT_MODE -> {mode}")
+        except Exception:
+            pass
+        return UpdateResult(model=replace(model, zoom_input_mode=mode))
+
     if t == Msg.BG_UPDATE:
         return UpdateResult(model=replace(model, bg_seq=model.bg_seq + 1))
 
     if t == Msg.BG_LOAD_IMAGE:
+        index = int(d["index"]) ; path = d["path"]
+        return UpdateResult(
+            model=replace(model, bg_last_load_index=index, bg_last_load_path=path),
+            commands=[
+                Commands.read_file(
+                    path,
+                    on_success=lambda content: make_message(Msg.BG_IMAGE_LOADED, index=index, path=path),
+                    on_error=lambda err: make_message(Msg.BG_IMAGE_ERROR, index=index, error=str(err))
+                )
+            ]
+        )
+
+    if t == Msg.BG_IMAGE_LOADED:
+        return UpdateResult(model=replace(model, bg_image_seq=model.bg_image_seq + 1, bg_seq=model.bg_seq + 1))
+
+    if t == Msg.BG_IMAGE_ERROR:
+        return UpdateResult(model=model)
+
+    if t == Msg.LAYOUT_APPLY:
+        return UpdateResult(model=replace(model, layout_seq=model.layout_seq + 1, last_layout_name=d["name"]))
+
+    if t == Msg.SET_NODE_TEXT:
         return UpdateResult(model=replace(
             model,
-            bg_last_load_index=int(d["index"]),
-            bg_last_load_path=d["path"],
-            bg_image_seq=model.bg_image_seq + 1
+            last_node_text_id=d["node_id"],
+            last_node_text_value=d["text"],
+            node_text_seq=model.node_text_seq + 1
         ))
+
+    if t == Msg.SET_EDGE_TEXT:
+        return UpdateResult(model=replace(
+            model,
+            last_edge_text_id=d["edge_id"],
+            last_edge_text_value=d["text"],
+            edge_text_seq=model.edge_text_seq + 1
+        ))
+
+    if t in (Msg.CLIPBOARD_COPY, Msg.CLIPBOARD_CUT, Msg.CLIPBOARD_PASTE):
+        # Render-only clipboard operations
+        return UpdateResult(model=model)
 
     return UpdateResult(model=model)
 
