@@ -514,7 +514,6 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
                 # Check if checkboard has been temporarily disabled due to crashes
                 if not hasattr(graph_canvas, '_checkboard_crash_disabled'):
                     graph_canvas._checkboard_crash_disabled = False
-                
                 if not graph_canvas._checkboard_crash_disabled:
                     try:
                         result = draw_checkboard_aligned_with_grid(graph_canvas, dc)
@@ -532,7 +531,6 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
                         print("DEBUG: 🛑 TEMPORARILY disabling checkboard due to crash - restart app to re-enable")
                         graph_canvas._checkboard_crash_disabled = True
                         graph_canvas.checkerboard_background = False
-                                    
                         # Update UI to reflect this change
                         if hasattr(graph_canvas, 'main_window') and hasattr(graph_canvas.main_window, 'checkboard_bg_cb'):
                             try:
@@ -548,7 +546,7 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
                 print("DEBUG: Called draw_grid")
             else:
                 print("DEBUG: Grid disabled (style is 'none')")
-        
+            
         # Duplicate checkerboard and grid drawing removed; handled inside world transform above
         
         # Draw zoom center crosshair for zoom feedback in SCREEN coordinates (stays at zoom center)
@@ -614,7 +612,7 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
                     # Default to visible if no visible property
                     draw_edge(graph_canvas, dc, edge)
                     edge_count += 1
-            print(f"DEBUG: Drew {edge_count} edges")
+        print(f"DEBUG: Drew {edge_count} edges")
 
         # Draw nodes (only visible ones) under world transform
         visible_count = 0
@@ -625,7 +623,7 @@ def draw(graph_canvas: "m_graph_canvas.GraphCanvas", dc):
                 if node.visible:
                     visible_count += 1
                     draw_node(graph_canvas, dc, node)
-            print(f"DEBUG: Drew {visible_count}/{total_count} nodes")
+        print(f"DEBUG: Drew {visible_count}/{total_count} nodes")
         
         # Debug: Report if any nodes are invisible
         if visible_count < total_count:
@@ -2237,8 +2235,18 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
         return
 
     gc = dc.GetGraphicsContext() if hasattr(dc, 'GetGraphicsContext') else None
-    # Prefer world-coordinate drawing via GC when available (unified transform)
+    # Prefer world-coordinate straight-line drawing via GC only for straight edges;
+    # for curves (bspline, bezier, curved, etc.) fall back to screen-space renderer below
+    use_gc_straight = False
     if gc:
+        try:
+            rendering_type = edge.rendering_type if edge.rendering_type else graph_canvas.edge_rendering_type
+            if rendering_type in (None, "straight") and not getattr(edge, 'is_composite', False) and (not getattr(edge, 'control_points', None)):
+                use_gc_straight = True
+        except Exception:
+            use_gc_straight = True
+
+    if gc and use_gc_straight:
         try:
             # Compute anchor endpoints in world space if helper available; else use node centers
             if hasattr(graph_canvas, 'get_edge_anchor_endpoints_world'):
@@ -2323,30 +2331,123 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
             # Fallback to screen-space method below
             pass
 
+    # World-coordinate curved edge rendering using sampled curve points
+    if gc:
+        try:
+            rendering_type = edge.rendering_type if edge.rendering_type else graph_canvas.edge_rendering_type
+            is_curve = rendering_type in ("curved", "bspline", "bezier", "cubic_spline", "nurbs", "polyline", "freeform", "composite") or bool(getattr(edge, 'control_points', None))
+            if is_curve:
+                # Determine anchor endpoints in world space
+                if hasattr(graph_canvas, 'get_edge_anchor_endpoints_world'):
+                    source_anchor_world, target_anchor_world = graph_canvas.get_edge_anchor_endpoints_world(edge, source_node, target_node)
+                    sxw, syw = source_anchor_world
+                    txw, tyw = target_anchor_world
+                else:
+                    sxw, syw = source_node.x, source_node.y
+                    txw, tyw = target_node.x, target_node.y
+
+                # Build a path by sampling the curve in WORLD coordinates
+                segments = 60
+                path = gc.CreatePath()
+                path.MoveToPoint(sxw, syw)
+                for i in range(1, segments + 1):
+                    t = i / segments
+                    pt = graph_canvas.calculate_position_on_curve(edge, source_node, target_node, t)
+                    if pt:
+                        path.AddLineToPoint(pt[0], pt[1])
+                # Ensure we end exactly at target anchor
+                path.AddLineToPoint(txw, tyw)
+
+                # Stroke the curve path in world coordinates
+                color = wx.Colour(255, 50, 50) if edge.selected else wx.Colour(*edge.color)
+                gc.SetPen(wx.Pen(color, max(1, int(edge.width))))
+                gc.StrokePath(path)
+
+                # Draw arrow aligned to the curve tangent
+                if getattr(edge, 'directed', True):
+                    try:
+                        t_arrow = float(getattr(edge, 'arrow_position', 0.5))
+                    except Exception:
+                        t_arrow = 0.5
+                    t_arrow = max(0.01, min(0.99, t_arrow))
+                    p1 = graph_canvas.calculate_position_on_curve(edge, source_node, target_node, t_arrow)
+                    p2 = graph_canvas.calculate_position_on_curve(edge, source_node, target_node, min(0.999, t_arrow + 0.01))
+                    if p1 and p2:
+                        dx = p2[0] - p1[0]
+                        dy = p2[1] - p1[1]
+                        seg_len = math.hypot(dx, dy)
+                        if seg_len > 1e-6:
+                            ux = dx / seg_len
+                            uy = dy / seg_len
+                            # Arrow geometry in world units
+                            arrow_size = max(8.0, float(edge.width) * 3.0)
+                            arrow_width = arrow_size * 0.5
+                            px = -uy
+                            py = ux
+                            apath = gc.CreatePath()
+                            tip_x = p1[0]
+                            tip_y = p1[1]
+                            bl_x = tip_x - arrow_size * ux + arrow_width * px
+                            bl_y = tip_y - arrow_size * uy + arrow_width * py
+                            mid_x = tip_x - (arrow_size * 0.5) * ux
+                            mid_y = tip_y - (arrow_size * 0.5) * uy
+                            br_x = tip_x - arrow_size * ux - arrow_width * px
+                            br_y = tip_y - arrow_size * uy - arrow_width * py
+                            apath.MoveToPoint(tip_x, tip_y)
+                            apath.AddLineToPoint(bl_x, bl_y)
+                            apath.AddLineToPoint(mid_x, mid_y)
+                            apath.AddLineToPoint(br_x, br_y)
+                            apath.CloseSubpath()
+                            gc.SetBrush(wx.Brush(color))
+                            gc.SetPen(wx.Pen(color, 1))
+                            gc.FillPath(apath)
+                            gc.StrokePath(apath)
+                            # Yellow position dot
+                            ctrl_r = max(3.0, min(8.0, float(edge.width) * 1.5))
+                            gc.SetBrush(wx.Brush(wx.Colour(255, 255, 0)))
+                            gc.SetPen(wx.Pen(wx.Colour(0, 0, 0), 1))
+                            gc.DrawEllipse(tip_x - ctrl_r, tip_y - ctrl_r, ctrl_r * 2.0, ctrl_r * 2.0)
+
+                # Curve drawn; labels handled below in screen-space if needed
+                return
+        except Exception:
+            # Fall through to screen-space fallback below
+            pass
+
     # Set colors
     if edge.selected:
         color = wx.Colour(255, 50, 50)  # Bright red for selected
     else:
         color = wx.Colour(*edge.color)
 
-    # Fallback path: screen-space drawing
+    # Fallback path: screen-space drawing (keeps curve math consistent)
     source_screen = graph_canvas.world_to_screen(source_node.x, source_node.y)
     target_screen = graph_canvas.world_to_screen(target_node.x, target_node.y)
     source_adjusted = graph_canvas.calculate_line_endpoint(source_node, target_node, source_screen, target_screen, True, edge)
     target_adjusted = graph_canvas.calculate_line_endpoint(target_node, source_node, target_screen, source_screen, False, edge)
 
-    # Draw edge line - always solid, arrows will indicate direction
-    dc.SetPen(
-        wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom)),
-                wx.PENSTYLE_SOLID))
-
-    # Always use the proper curve drawing methods, not simple line segments
-    # Draw edge based on rendering type
+    # Draw edge based on rendering type (functions expect screen-space endpoints for sampling)
+    # Ensure the world transform is active so world_to_screen stays consistent across the frame
     draw_edge_by_type(graph_canvas, dc, source_adjusted, target_adjusted, edge)
 
-    # Draw arrow for directed edges only
+    # Draw arrow for directed edges only; project along curve for curved types
     if edge.directed:
-        draw_arrow(graph_canvas, dc, source_adjusted, target_adjusted, edge, source_node, target_node)
+        rendering_type = edge.rendering_type if edge.rendering_type else graph_canvas.edge_rendering_type
+        if rendering_type in ("straight", None):
+            draw_arrow(graph_canvas, dc, source_adjusted, target_adjusted, edge, source_node, target_node)
+        else:
+            # Sample curve near arrow position to get local segment
+            try:
+                t = float(getattr(edge, 'arrow_position', 0.5))
+            except Exception:
+                t = 0.5
+            t = max(0.01, min(0.99, t))
+            p_world = graph_canvas.calculate_position_on_curve(edge, source_node, target_node, t)
+            p2_world = graph_canvas.calculate_position_on_curve(edge, source_node, target_node, min(0.999, t + 0.01))
+            if p_world and p2_world:
+                p_screen = graph_canvas.world_to_screen(p_world[0], p_world[1])
+                p2_screen = graph_canvas.world_to_screen(p2_world[0], p2_world[1])
+                draw_arrow(graph_canvas, dc, p_screen, p2_screen, edge, source_node, target_node)
     # else: edge is undirected, no arrow needed
 
     # Draw text

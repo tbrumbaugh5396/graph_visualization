@@ -81,26 +81,32 @@ def render(ui_state, model, last) -> None:
                     print("file_mvu.render: applying loaded graph to UI")
                 except Exception:
                     pass
-                import json
-                import models.graph as m_graph
-                data = json.loads(model.last_loaded_json)
-                new_graph = m_graph.Graph.from_dict(data)
-                new_graph.file_path = model.current_file_path
-                new_graph.modified = False
-                main_window.current_graph = new_graph
-                if hasattr(main_window, 'canvas') and main_window.canvas:
-                    main_window.canvas.set_graph(new_graph, emit_signal=False)
-                    main_window.canvas.Refresh()
-                    try:
-                        print("file_mvu.render: canvas updated and refreshed")
-                    except Exception:
-                        pass
-                main_window.SetTitle(f"Graph Editor - {new_graph.name}")
+                import wx as _wx
+                def _apply_loaded():
+                    import json
+                    import models.graph as m_graph
+                    data = json.loads(model.last_loaded_json)
+                    new_graph = m_graph.Graph.from_dict(data)
+                    new_graph.file_path = model.current_file_path
+                    new_graph.modified = False
+                    main_window.current_graph = new_graph
+                    if hasattr(main_window, 'canvas') and main_window.canvas:
+                        main_window.canvas.set_graph(new_graph, emit_signal=False)
+                        main_window.canvas.Refresh()
+                        try:
+                            print("file_mvu.render: canvas updated and refreshed")
+                        except Exception:
+                            pass
+                    main_window.SetTitle(f"Graph Editor - {new_graph.name}")
+                _wx.CallAfter(_apply_loaded)
             elif model.last_file_status == 'saved':
-                if hasattr(main_window, 'current_graph') and main_window.current_graph:
-                    main_window.current_graph.file_path = model.current_file_path
-                    main_window.current_graph.modified = False
-                    main_window.SetTitle(f"Graph Editor - {main_window.current_graph.name}")
+                import wx as _wx
+                def _apply_saved():
+                    if hasattr(main_window, 'current_graph') and main_window.current_graph:
+                        main_window.current_graph.file_path = model.current_file_path
+                        main_window.current_graph.modified = False
+                        main_window.SetTitle(f"Graph Editor - {main_window.current_graph.name}")
+                _wx.CallAfter(_apply_saved)
     except Exception as e:
         print(f"file_mvu.render error: {e}")
 

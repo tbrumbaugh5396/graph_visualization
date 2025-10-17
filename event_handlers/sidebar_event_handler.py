@@ -387,10 +387,12 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
         print(f"DEBUG: 🔧 Controls already created, returning early")
         return
     
-    # B-spline Control Points panel (place under Graph Properties pane if available)
-    parent_container = getattr(main_window, 'graph_properties_pane', None)
-    parent_window = parent_container.GetPane() if parent_container else main_window.sidebar
-    target_sizer = getattr(main_window, 'graph_properties_sizer', None)
+    # Control Points panel should live inside the Property Panel (below Graph Properties)
+    prop_panel = getattr(main_window, 'property_panel_pane', None)
+    parent_window = prop_panel.GetPane() if prop_panel else main_window.sidebar
+    # Prefer explicit sizer exposed on main_window
+    preferred_sizer = getattr(main_window, 'property_panel_sizer', None)
+    target_sizer = None
 
     main_window.bspline_box = wx.StaticBox(parent_window,
                                     label="B-spline Control Points")
@@ -593,12 +595,27 @@ def create_bspline_controls(main_window: "m_main_window.MainWindow"):
     main_window.composite_sizer = composite_sizer
     main_window.composite_sizer.ShowItems(False)  # Hide initially
     
-    # Add to Graph Properties if available; fallback to edge section
+    # Add under the Property Panel if available; fallback to edge section
     if not main_window.bspline_added_to_sizer:
-        if target_sizer is not None:
-            target_sizer.Add(main_window.bspline_sizer, 0, wx.EXPAND | wx.ALL, 5)
+        if preferred_sizer is not None:
+            preferred_sizer.Add(main_window.bspline_sizer, 0, wx.EXPAND | wx.ALL, 5)
             if hasattr(main_window, 'composite_sizer'):
-                target_sizer.Add(main_window.composite_sizer, 0, wx.EXPAND | wx.ALL, 5)
+                preferred_sizer.Add(main_window.composite_sizer, 0, wx.EXPAND | wx.ALL, 5)
+            try:
+                parent_window.Layout()
+                main_window.property_panel_pane.Layout()
+            except Exception:
+                pass
+        elif prop_panel is not None:
+            parent_window.GetSizer().Add(main_window.bspline_sizer, 0, wx.EXPAND | wx.ALL, 5)
+            if hasattr(main_window, 'composite_sizer'):
+                parent_window.GetSizer().Add(main_window.composite_sizer, 0, wx.EXPAND | wx.ALL, 5)
+            # Refresh layouts so panels do not overlap
+            try:
+                parent_window.Layout()
+                main_window.property_panel_pane.Layout()
+            except Exception:
+                pass
         else:
             edge_sizer = main_window.edge_type_choice.GetParent().GetSizer()
             edge_sizer.Add(main_window.bspline_sizer, 0, wx.EXPAND | wx.ALL, 2)
@@ -920,8 +937,11 @@ def show_bspline_controls(main_window: "m_main_window.MainWindow", edge):
             f"Target: ({target_node.x:.1f}, {target_node.y:.1f}) - {target_node.text}"
         )
     
-    # Populate control points list
+    # Populate control points list (ensure we use the current edge reference)
+    main_window.current_curve_edge = edge
     main_window.update_bspline_list()
+    # Also keep legacy pointer in sync
+    main_window.current_bspline_edge = edge
     
     # Force layout update
     main_window.sidebar.Layout()

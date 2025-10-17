@@ -986,7 +986,7 @@ def setup_sidebar(main_window: "m_main_window.MainWindow"):
     main_window.edge_type_choice.SetForegroundColour(wx.Colour(255, 255, 255))
     main_window.edge_type_choice.SetBackgroundColour(wx.Colour(0, 0, 0))
     main_window.edge_type_choice.Refresh()
-    main_window.edge_type_choice.Bind(wx.EVT_CHOICE,  event_handlers.graph_canvas_event_handler.on_edge_type_changed)
+    main_window.edge_type_choice.Bind(wx.EVT_CHOICE,  partial(event_handlers.graph_canvas_event_handler.on_edge_type_changed, main_window))
     edge_sizer.Add( main_window.edge_type_choice, 0, wx.EXPAND | wx.ALL, 2)
 
     # Prevent overlapping edges toggle
@@ -1110,6 +1110,8 @@ def setup_sidebar(main_window: "m_main_window.MainWindow"):
     
     property_panel_window.SetSizer(property_panel_sizer)
     sidebar_sizer.Add(main_window.property_panel_pane, 0, wx.EXPAND | wx.ALL, 2)
+    # Expose the property panel sizer so other controls (e.g., control points) can be placed under it
+    main_window.property_panel_sizer = property_panel_sizer
 
     # Initialize edge anchor settings
     main_window.canvas.edge_anchor_mode = "nearest_face"  # Default mode
