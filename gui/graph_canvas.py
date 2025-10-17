@@ -777,10 +777,12 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         dy = point.y - cy
         # Compute S'/S
         ratio = new_zoom / old_zoom if old_zoom != 0 else 1.0
-        # Update offset so that the anchor remains fixed visually
-        # offset' = offset - (dx, dy) * (ratio - 1)
-        new_pan_x = self.pan_x - dx * (ratio - 1.0)
-        new_pan_y = self.pan_y - dy * (ratio - 1.0)
+        # Update pan so that the anchor remains fixed visually under rotation too
+        # Derivation: screen = center + pan + R(S*world). Keep screen constant when S->S':
+        # pan' = pan + R(S*world) - R(S'*world). Using dx,dy = pan + R(S*world):
+        # pan' = r*pan + (1 - r)*(dx,dy), where r = S'/S
+        new_pan_x = self.pan_x * ratio + (1.0 - ratio) * dx
+        new_pan_y = self.pan_y * ratio + (1.0 - ratio) * dy
         
         print(f"DEBUG: Required new pan to keep point fixed: ({new_pan_x:.3f}, {new_pan_y:.3f})")
 
