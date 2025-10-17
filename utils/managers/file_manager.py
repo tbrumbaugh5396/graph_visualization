@@ -288,7 +288,25 @@ class FileManager:
     
     def update_recent_menu(self):
         """Update recent files menu."""
-        menu = self.main_window.recent_menu
+        # Obtain or lazily create the recent files submenu to avoid attribute errors
+        menu = getattr(self.main_window, 'recent_menu', None)
+        if menu is None:
+            try:
+                import wx  # local import to avoid issues in headless contexts
+                menubar = getattr(self.main_window, 'GetMenuBar', lambda: None)()
+                if menubar:
+                    # Try common labels for File menu
+                    file_index = menubar.FindMenu("File")
+                    if getattr(wx, 'NOT_FOUND', -1) == file_index:
+                        file_index = menubar.FindMenu("&File")
+                    if file_index != getattr(wx, 'NOT_FOUND', -1):
+                        file_menu = menubar.GetMenu(file_index)
+                        menu = wx.Menu()
+                        file_menu.AppendSubMenu(menu, "&Recent Files", "Recently opened files")
+                        # Cache on main_window for subsequent updates
+                        setattr(self.main_window, 'recent_menu', menu)
+            except Exception:
+                menu = None
         if not menu:
             return
             

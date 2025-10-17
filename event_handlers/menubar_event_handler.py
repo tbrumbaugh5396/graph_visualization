@@ -41,6 +41,7 @@ def on_new_graph(main_window: "MainWindow", event):
 
 def on_open_graph(main_window: "MainWindow", event):
     """Open an existing graph."""
+    print("DEBUG: on_open_graph invoked")
     if main_window.current_graph.modified:
         dialog = wx.MessageDialog(
             main_window,
@@ -59,22 +60,26 @@ def on_open_graph(main_window: "MainWindow", event):
     
     # Show file dialog
     with wx.FileDialog(
-        main_window, "Open Graph", wildcard="Graph files (*.graph)|*.graph",
+        main_window, "Open Graph", wildcard="Graph files (*.graph;*.json)|*.graph;*.json",
         style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST
     ) as fileDialog:
         if fileDialog.ShowModal() == wx.ID_CANCEL:
+            print("DEBUG: Open Graph canceled by user")
             return
         
         # Load graph via MVU if available
         pathname = fileDialog.GetPath()
+        print(f"DEBUG: Open Graph selected path: {pathname}")
         try:
             if hasattr(main_window, 'mvu_adapter'):
                 from mvc_mvu.messages import make_message
                 import mvu.main_mvu as m_main_mvu
                 # Use command-based read to avoid blocking UI
+                print("DEBUG: Dispatching MVU LOAD_GRAPH_FROM_PATH")
                 main_window.mvu_adapter.dispatch(
                     make_message(m_main_mvu.Msg.LOAD_GRAPH_FROM_PATH, path=pathname)
                 )
+                print("DEBUG: MVU dispatch issued for open")
             else:
                 with open(pathname, 'r') as file:
                     data = json.load(file)
@@ -82,8 +87,10 @@ def on_open_graph(main_window: "MainWindow", event):
                     main_window.current_graph.file_path = pathname
                     main_window.SetTitle(f"Graph Editor - {main_window.current_graph.name}")
                     main_window.canvas.Refresh()
+                    print("DEBUG: Open Graph fallback loaded and refreshed")
         except Exception as e:
             wx.MessageBox(f"Failed to open graph: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
+            print(f"DEBUG: Open Graph error: {e}")
 
 
 def on_save_graph(main_window: "MainWindow", event) -> bool:
