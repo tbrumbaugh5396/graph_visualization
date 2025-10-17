@@ -878,35 +878,36 @@ def draw_grid(graph_canvas: "m_graph_canvas.GraphCanvas", dc, gc):
         # Add extra spacing to ensure full coverage
         extra_spacing = world_spacing * 2
         
-        # Vertical lines - draw in world coordinates using graphics context (same as nodes)
-        line_count = 0
-        # Align to world origin (0,0) by using modulo to find the first grid line
-        first_vertical_x = math.floor((world_left - extra_spacing) / world_spacing) * world_spacing
-        # Ensure we start from a grid line that's aligned to world origin
-        if first_vertical_x < 0:
-            first_vertical_x = math.floor(first_vertical_x / world_spacing) * world_spacing
-        x = first_vertical_x
-        while x <= world_right + extra_spacing:
-            # Draw in world coordinates using graphics context (same coordinate system as nodes)
-            gc.StrokeLine(x, world_top - extra_spacing, x, world_bottom + extra_spacing)
-            line_count += 1
-            x += world_spacing
-        print(f"DEBUG: Drew {line_count} vertical grid lines starting from {first_vertical_x}")
-        
-        # Horizontal lines - draw in world coordinates using graphics context (same as nodes)
-        line_count = 0
-        # Align to world origin (0,0) by using modulo to find the first grid line
-        first_horizontal_y = math.floor((world_top - extra_spacing) / world_spacing) * world_spacing
-        # Ensure we start from a grid line that's aligned to world origin
-        if first_horizontal_y < 0:
-            first_horizontal_y = math.floor(first_horizontal_y / world_spacing) * world_spacing
-        y = first_horizontal_y
-        while y <= world_bottom + extra_spacing:
-            # Draw in world coordinates using graphics context (same coordinate system as nodes)
-            gc.StrokeLine(world_left - extra_spacing, y, world_right + extra_spacing, y)
-            line_count += 1
-            y += world_spacing
-        print(f"DEBUG: Drew {line_count} horizontal grid lines starting from {first_horizontal_y}")
+        with world_transform(gc, graph_canvas):
+            # Vertical lines - draw in world coordinates using graphics context (same as nodes)
+            line_count = 0
+            # Align to world origin (0,0) by using modulo to find the first grid line
+            first_vertical_x = math.floor((world_left - extra_spacing) / world_spacing) * world_spacing
+            # Ensure we start from a grid line that's aligned to world origin
+            if first_vertical_x < 0:
+                first_vertical_x = math.floor(first_vertical_x / world_spacing) * world_spacing
+            x = first_vertical_x
+            while x <= world_right + extra_spacing:
+                # Draw in world coordinates using graphics context (same coordinate system as nodes)
+                gc.StrokeLine(x, world_top - extra_spacing, x, world_bottom + extra_spacing)
+                line_count += 1
+                x += world_spacing
+            print(f"DEBUG: Drew {line_count} vertical grid lines starting from {first_vertical_x}")
+            
+            # Horizontal lines - draw in world coordinates using graphics context (same as nodes)
+            line_count = 0
+            # Align to world origin (0,0) by using modulo to find the first grid line
+            first_horizontal_y = math.floor((world_top - extra_spacing) / world_spacing) * world_spacing
+            # Ensure we start from a grid line that's aligned to world origin
+            if first_horizontal_y < 0:
+                first_horizontal_y = math.floor(first_horizontal_y / world_spacing) * world_spacing
+            y = first_horizontal_y
+            while y <= world_bottom + extra_spacing:
+                # Draw in world coordinates using graphics context (same coordinate system as nodes)
+                gc.StrokeLine(world_left - extra_spacing, y, world_right + extra_spacing, y)
+                line_count += 1
+                y += world_spacing
+            print(f"DEBUG: Drew {line_count} horizontal grid lines starting from {first_horizontal_y}")
         
     elif graph_canvas.grid_style == "dots":
         print(f"DEBUG: Drawing dots in world coordinates...")
@@ -917,18 +918,19 @@ def draw_grid(graph_canvas: "m_graph_canvas.GraphCanvas", dc, gc):
         # Add extra spacing to ensure full coverage
         extra_spacing = world_spacing * 2
         
-        # Find grid intersections in visible world area with extra coverage
-        first_y = math.floor((world_top - extra_spacing) / world_spacing) * world_spacing
-        y = first_y
-        while y <= world_bottom + extra_spacing:
-            first_x = math.floor((world_left - extra_spacing) / world_spacing) * world_spacing
-            x = first_x
-            while x <= world_right + extra_spacing:
-                # Draw in world coordinates using graphics context (same coordinate system as nodes)
-                gc.DrawEllipse(x - dot_radius, y - dot_radius, dot_radius * 2, dot_radius * 2)
-                dot_count += 1
-                x += world_spacing
-            y += world_spacing
+        with world_transform(gc, graph_canvas):
+            # Find grid intersections in visible world area with extra coverage
+            first_y = math.floor((world_top - extra_spacing) / world_spacing) * world_spacing
+            y = first_y
+            while y <= world_bottom + extra_spacing:
+                first_x = math.floor((world_left - extra_spacing) / world_spacing) * world_spacing
+                x = first_x
+                while x <= world_right + extra_spacing:
+                    # Draw in world coordinates using graphics context (same coordinate system as nodes)
+                    gc.DrawEllipse(x - dot_radius, y - dot_radius, dot_radius * 2, dot_radius * 2)
+                    dot_count += 1
+                    x += world_spacing
+                y += world_spacing
         print(f"DEBUG: Drew {dot_count} dots")
 
     print("DEBUG: ===== DRAW_GRID END =====")

@@ -28,7 +28,7 @@ def update(t: Any, d: dict, model) -> Optional[UpdateResult]:
         return UpdateResult(model=new_model)
     if name == 'SET_ZOOM_INPUT_MODE':
         mode = str(d['mode']).lower()
-        if mode not in ('wheel', 'touchpad'):
+        if mode not in ('wheel', 'touchpad', 'both'):
             mode = 'wheel'
         new_model = type(model)(**{**model.__dict__, 'zoom_input_mode': mode})
         return UpdateResult(model=new_model)

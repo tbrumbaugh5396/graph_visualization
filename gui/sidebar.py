@@ -554,12 +554,18 @@ def setup_sidebar(main_window: "m_main_window.MainWindow"):
     zoom_input_sizer = wx.BoxSizer(wx.HORIZONTAL)
     zoom_input_label = wx.StaticText(movement_panel, label="Zoom Input:")
     zoom_input_label.SetForegroundColour(wx.Colour(0, 0, 0))
-    main_window.zoom_input_choice = wx.Choice(movement_panel, choices=["Wheel", "Touchpad"])
+    main_window.zoom_input_choice = wx.Choice(movement_panel, choices=["Wheel", "Touchpad", "Both"])
     try:
         default_mode = "Wheel"
         if hasattr(main_window, 'mvu_adapter'):
             m = main_window.mvu_adapter.model
-            default_mode = "Touchpad" if getattr(m, 'zoom_input_mode', 'wheel') == 'touchpad' else "Wheel"
+            zmode = getattr(m, 'zoom_input_mode', 'wheel')
+            if zmode == 'touchpad':
+                default_mode = "Touchpad"
+            elif zmode == 'both':
+                default_mode = "Both"
+            else:
+                default_mode = "Wheel"
         main_window.zoom_input_choice.SetStringSelection(default_mode)
     except Exception:
         main_window.zoom_input_choice.SetStringSelection("Wheel")

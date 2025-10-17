@@ -42,7 +42,7 @@ class AppModel(Model):
     move_inverted: bool = False
     zoom_sensitivity: float = 1.0
     rotation_deg: float = 0.0
-    zoom_input_mode: str = "wheel"  # 'wheel' or 'touchpad'
+    zoom_input_mode: str = "wheel"  # 'wheel' | 'touchpad' | 'both'
     # Background updates sequence
     bg_seq: int = 0
     bg_image_seq: int = 0
@@ -232,7 +232,7 @@ def update_fn(message: Any, model: AppModel) -> UpdateResult[AppModel]:
 
     if t == Msg.SET_ZOOM_INPUT_MODE:
         mode = str(d["mode"]).lower()
-        if mode not in ("wheel", "touchpad"):
+        if mode not in ("wheel", "touchpad", "both"):
             mode = "wheel"
         try:
             print(f"DEBUG: MVU update SET_ZOOM_INPUT_MODE -> {mode}")

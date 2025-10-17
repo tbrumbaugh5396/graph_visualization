@@ -1481,13 +1481,19 @@ def on_zoom_sensitivity_changed(main_window: "m_main_window.MainWindow", event):
 
 
 def _on_zoom_input_mode_changed(main_window: "m_main_window.MainWindow", event):
-    """Handle zoom input mode choice (Wheel vs Touchpad)."""
+    """Handle zoom input mode choice (Wheel vs Touchpad vs Both)."""
     try:
         if hasattr(main_window, 'mvu_adapter'):
             from mvc_mvu.messages import make_message
             import mvu.main_mvu as m_main_mvu
             label = main_window.zoom_input_choice.GetStringSelection()
-            mode = 'touchpad' if label.lower() == 'touchpad' else 'wheel'
+            l = (label or '').strip().lower()
+            if l == 'both':
+                mode = 'both'
+            elif l == 'touchpad':
+                mode = 'touchpad'
+            else:
+                mode = 'wheel'
             try:
                 print(f"DEBUG: Sidebar zoom input mode changed -> {mode}")
             except Exception:

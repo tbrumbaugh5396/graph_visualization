@@ -302,6 +302,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             print(f"DEBUG: Ignoring mouse wheel zoom because zoom_input_mode={mode}")
             event.Skip()
             return
+        # In 'both' mode, allow wheel to proceed
         self.zoom_event_counter += 1
         print(f"DEBUG: ===== MOUSE WHEEL EVENT #{self.zoom_event_counter} START =====")
         
@@ -415,6 +416,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             print(f"DEBUG: Ignoring magnify zoom because zoom_input_mode={mode}")
             event.Skip()
             return
+        # In 'both' mode, allow magnify to proceed
         
         if self.zoom_event_in_progress:
             print(f"DEBUG: Skipping magnify #{self.zoom_event_counter} - zoom event already in progress")
@@ -3671,7 +3673,6 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
     def calculate_line_endpoint(self, node, other_node, node_screen,
                                 other_screen, is_source, edge=None):
         """Calculate the proper endpoint for a line to avoid overlapping with the node."""
-
         # Check for custom endpoint position first
         if edge and hasattr(edge, 'custom_endpoints'):
             endpoint_key = 'source' if is_source else 'target'
@@ -3679,42 +3680,46 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 custom_world_pos = edge.custom_endpoints[endpoint_key]
                 custom_screen_pos = self.world_to_screen(custom_world_pos[0], custom_world_pos[1])
                 return (int(custom_screen_pos[0]), int(custom_screen_pos[1]))
-        
-        # Calculate direction vector
-        dx = other_screen[0] - node_screen[0]
-        dy = other_screen[1] - node_screen[1]
-        length = math.sqrt(dx * dx + dy * dy)
 
-        if length == 0:
+        # Perform endpoint computation in WORLD coordinates so rotation does not distort anchors
+        node_cx_w, node_cy_w = node.x, node.y
+        other_cx_w, other_cy_w = other_node.x, other_node.y
+
+        # Direction vector in world space
+        dx_w = other_cx_w - node_cx_w
+        dy_w = other_cy_w - node_cy_w
+        length_w = math.sqrt(dx_w * dx_w + dy_w * dy_w)
+        if length_w == 0:
+            # Fallback: return passed-in center in screen coords
             return node_screen
 
-        # Normalize direction
-        dx /= length
-        dy /= length
+        # Normalize direction in world space
+        dx_w /= length_w
+        dy_w /= length_w
 
-        # Calculate node dimensions in screen space
-        node_width = int(node.width * self.zoom)
-        node_height = int(node.height * self.zoom)
+        # Node dimensions in WORLD units (unscaled); world transform will scale uniformly
+        node_width_w = float(node.width)
+        node_height_w = float(node.height)
 
-        # Calculate distance from center to edge
-        if abs(dx) > 0.001:
-            dist_to_vertical_edge = (node_width / 2) / abs(dx)
+        # Distance from center to rectangle edges along the ray in world space
+        if abs(dx_w) > 0.001:
+            dist_to_vertical_edge_w = (node_width_w / 2.0) / abs(dx_w)
         else:
-            dist_to_vertical_edge = float('inf')
+            dist_to_vertical_edge_w = float('inf')
 
-        if abs(dy) > 0.001:
-            dist_to_horizontal_edge = (node_height / 2) / abs(dy)
+        if abs(dy_w) > 0.001:
+            dist_to_horizontal_edge_w = (node_height_w / 2.0) / abs(dy_w)
         else:
-            dist_to_horizontal_edge = float('inf')
+            dist_to_horizontal_edge_w = float('inf')
 
-        # Use the smaller distance
-        edge_distance = min(dist_to_vertical_edge, dist_to_horizontal_edge)
+        edge_distance_w = min(dist_to_vertical_edge_w, dist_to_horizontal_edge_w)
 
-        # Calculate the endpoint at the node boundary
-        endpoint_x = node_screen[0] + dx * edge_distance
-        endpoint_y = node_screen[1] + dy * edge_distance
+        endpoint_x_w = node_cx_w + dx_w * edge_distance_w
+        endpoint_y_w = node_cy_w + dy_w * edge_distance_w
 
-        return (int(endpoint_x), int(endpoint_y))
+        # Convert back to screen coordinates for drawing/UI
+        endpoint_screen = self.world_to_screen(endpoint_x_w, endpoint_y_w)
+        return (int(endpoint_screen[0]), int(endpoint_screen[1]))
 
     def get_edge_anchor_endpoints_world(self, edge, source_node, target_node):
         """Get the actual anchor endpoints in world coordinates for proper curve calculations."""

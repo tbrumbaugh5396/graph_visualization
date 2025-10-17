@@ -7,7 +7,7 @@ import json
 from typing import Literal
 
 
-ZoomMode = Literal['wheel', 'touchpad']
+ZoomMode = Literal['wheel', 'touchpad', 'both']
 
 
 class ZoomManager:
@@ -28,7 +28,10 @@ class ZoomManager:
                 with open(self.config_file, 'r') as f:
                     data = json.load(f)
                     mode = str(data.get('mode', 'wheel')).lower()
-                    self._mode = 'touchpad' if mode == 'touchpad' else 'wheel'
+                    if mode in ('wheel', 'touchpad', 'both'):
+                        self._mode = mode  # persist exactly
+                    else:
+                        self._mode = 'wheel'
                     sens = float(data.get('sensitivity', 1.0))
                     # Clamp sensitivity to reasonable range
                     self._sensitivity = max(0.1, min(5.0, sens))
@@ -50,7 +53,7 @@ class ZoomManager:
 
     def set_mode(self, mode: str) -> None:
         mode = str(mode).lower()
-        self._mode = 'touchpad' if mode == 'touchpad' else 'wheel'
+        self._mode = mode if mode in ('wheel', 'touchpad', 'both') else 'wheel'
         self.save()
 
     def get_sensitivity(self) -> float:
