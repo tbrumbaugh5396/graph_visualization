@@ -1113,6 +1113,28 @@ def setup_sidebar(main_window: "m_main_window.MainWindow"):
     # Expose the property panel sizer so other controls (e.g., control points) can be placed under it
     main_window.property_panel_sizer = property_panel_sizer
 
+    # Always-present collapsible: Control Points
+    main_window.control_points_pane = wx.CollapsiblePane(main_window.sidebar, label="Control Points")
+    main_window.control_points_pane.SetForegroundColour(wx.Colour(0, 0, 0))
+    main_window.collapsible_panes.append(main_window.control_points_pane)
+    main_window.control_points_pane.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, partial(m_sidebar_event_handler.on_individual_pane_changed, main_window))
+    cp_window = main_window.control_points_pane.GetPane()
+    cp_sizer = wx.BoxSizer(wx.VERTICAL)
+    # Empty container; populated by event_handlers.sidebar_event_handler.show_curve_controls
+    cp_window.SetSizer(cp_sizer)
+    sidebar_sizer.Add(main_window.control_points_pane, 0, wx.EXPAND | wx.ALL, 5)
+
+    # Always-present collapsible: Composite Segments
+    main_window.composite_pane = wx.CollapsiblePane(main_window.sidebar, label="Composite Segments")
+    main_window.composite_pane.SetForegroundColour(wx.Colour(0, 0, 0))
+    main_window.collapsible_panes.append(main_window.composite_pane)
+    main_window.composite_pane.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, partial(m_sidebar_event_handler.on_individual_pane_changed, main_window))
+    comp_window = main_window.composite_pane.GetPane()
+    comp_sizer = wx.BoxSizer(wx.VERTICAL)
+    # Empty container; populated by event_handlers.sidebar_event_handler when curve type is composite
+    comp_window.SetSizer(comp_sizer)
+    sidebar_sizer.Add(main_window.composite_pane, 0, wx.EXPAND | wx.ALL, 5)
+
     # Initialize edge anchor settings
     main_window.canvas.edge_anchor_mode = "nearest_face"  # Default mode
     main_window.canvas.show_anchor_points =  main_window.show_anchor_points_cb.GetValue()
