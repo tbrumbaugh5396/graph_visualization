@@ -1508,7 +1508,7 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
         return None
 
     def get_edge_at_position(self, screen_x: int, screen_y: int) -> Optional[m_edge.Edge]:
-        """Get the edge at the given screen position, checking against actual curve paths."""
+        """Get the edge at the given screen position, checking against actual curve paths with anchor endpoints."""
 
         world_x, world_y = self.screen_to_world(screen_x, screen_y)
         tolerance = max(10.0, 15.0 / self.zoom)  # Click tolerance in world coordinates, scales with zoom
@@ -1520,9 +1520,20 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             if not source_node or not target_node:
                 continue
             
+            # Prefer anchor endpoints (connection points) for better hit-testing alignment
+            if hasattr(self, 'get_edge_anchor_endpoints_world'):
+                try:
+                    src_anchor, tgt_anchor = self.get_edge_anchor_endpoints_world(edge, source_node, target_node)
+                except Exception:
+                    src_anchor = (source_node.x, source_node.y)
+                    tgt_anchor = (target_node.x, target_node.y)
+            else:
+                src_anchor = (source_node.x, source_node.y)
+                tgt_anchor = (target_node.x, target_node.y)
+
             # Check if point is near the actual curve path
             if self.point_near_curve(world_x, world_y, edge, source_node, target_node, tolerance):
-                    return edge
+                return edge
         return None
     
     def point_near_curve(self, px, py, edge, source_node, target_node, tolerance):
@@ -2929,6 +2940,24 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
 
         rendering_type = edge.rendering_type if edge.rendering_type else self.edge_rendering_type
         
+        # Determine connection-point anchors (not node centers) for endpoints
+        try:
+            if hasattr(self, 'get_edge_anchor_endpoints_world'):
+                src_anchor, tgt_anchor = self.get_edge_anchor_endpoints_world(edge, source_node, target_node)
+                src_x, src_y = src_anchor
+                tgt_x, tgt_y = tgt_anchor
+            else:
+                # Fallback: compute adjusted endpoints in screen space and convert back to world
+                src_screen = self.world_to_screen(source_node.x, source_node.y)
+                tgt_screen = self.world_to_screen(target_node.x, target_node.y)
+                src_adj = self.calculate_line_endpoint(source_node, target_node, src_screen, tgt_screen, True, edge)
+                tgt_adj = self.calculate_line_endpoint(target_node, source_node, tgt_screen, src_screen, False, edge)
+                src_x, src_y = self.screen_to_world(src_adj[0], src_adj[1])
+                tgt_x, tgt_y = self.screen_to_world(tgt_adj[0], tgt_adj[1])
+        except Exception:
+            src_x, src_y = source_node.x, source_node.y
+            tgt_x, tgt_y = target_node.x, target_node.y
+
         # Initialize control points if they don't exist (but preserve user preference for 0 control points)
         if not hasattr(edge, 'control_points'):
             edge.control_points = []
@@ -2944,9 +2973,9 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             self.initialize_control_points(edge, source_node, target_node)
         
         if rendering_type == "straight":
-            # Linear interpolation for straight lines
-            x = source_node.x + t * (target_node.x - source_node.x)
-            y = source_node.y + t * (target_node.y - source_node.y)
+            # Linear interpolation between connection anchors
+            x = src_x + t * (tgt_x - src_x)
+            y = src_y + t * (tgt_y - src_y)
             return (x, y)
         
         elif rendering_type == "curved":
@@ -2955,31 +2984,31 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 cp = edge.control_points[0]
             else:
                 # Calculate default control point
-                dx = target_node.x - source_node.x
-                dy = target_node.y - source_node.y
+                dx = tgt_x - src_x
+                dy = tgt_y - src_y
                 length = max(1, math.sqrt(dx*dx + dy*dy))
                 offset = length * 0.25
                 perp_x = -dy / length * offset
                 perp_y = dx / length * offset
-                mid_x = (source_node.x + target_node.x) / 2
-                mid_y = (source_node.y + target_node.y) / 2
+                mid_x = (src_x + tgt_x) / 2
+                mid_y = (src_y + tgt_y) / 2
                 cp = (mid_x + perp_x, mid_y + perp_y)
             # Quadratic Bézier evaluation: B(t) = (1-t)²P₀ + 2(1-t)tP₁ + t²P₂
-            x = (1-t)**2 * source_node.x + 2*(1-t)*t * cp[0] + t**2 * target_node.x
-            y = (1-t)**2 * source_node.y + 2*(1-t)*t * cp[1] + t**2 * target_node.y
+            x = (1-t)**2 * src_x + 2*(1-t)*t * cp[0] + t**2 * tgt_x
+            y = (1-t)**2 * src_y + 2*(1-t)*t * cp[1] + t**2 * tgt_y
             return (x, y)
         
         elif rendering_type == "bezier":
             # For Bézier curves, use the new multi-point evaluation
             if edge.control_points and len(edge.control_points) >= 1:
-                control_points = [(source_node.x, source_node.y)] + edge.control_points + [(target_node.x, target_node.y)]
+                control_points = [(src_x, src_y)] + edge.control_points + [(tgt_x, tgt_y)]
             else:
                 # Calculate default control points for cubic Bézier
-                dx = target_node.x - source_node.x
-                dy = target_node.y - source_node.y
-                ctrl1 = (source_node.x + dx * 0.3, source_node.y + dy * 0.3 - 30)
-                ctrl2 = (source_node.x + dx * 0.7, source_node.y + dy * 0.7 + 30)
-                control_points = [(source_node.x, source_node.y), ctrl1, ctrl2, (target_node.x, target_node.y)]
+                dx = tgt_x - src_x
+                dy = tgt_y - src_y
+                ctrl1 = (src_x + dx * 0.3, src_y + dy * 0.3 - 30)
+                ctrl2 = (src_x + dx * 0.7, src_y + dy * 0.7 + 30)
+                control_points = [(src_x, src_y), ctrl1, ctrl2, (tgt_x, tgt_y)]
             
             return self.evaluate_bezier_curve(control_points, t)
         
@@ -2988,15 +3017,15 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             if (hasattr(edge, 'control_points') and edge.control_points and 
                 isinstance(edge.control_points, list) and len(edge.control_points) >= 1):
                 try:
-                # Create points list: source -> control points -> target
-                    points = [(source_node.x, source_node.y)] + edge.control_points + [(target_node.x, target_node.y)]
+                    # Create points list: anchors -> control points -> anchor
+                    points = [(src_x, src_y)] + edge.control_points + [(tgt_x, tgt_y)]
                     return self.evaluate_interpolating_spline(points, t)
                 except (IndexError, TypeError, ValueError) as e:
                     print(f"DEBUG: ⚠️ Error evaluating cubic spline position: {e}, using linear interpolation")
             
                 # Fallback to linear interpolation
-                x = source_node.x + t * (target_node.x - source_node.x)
-                y = source_node.y + t * (target_node.y - source_node.y)
+                x = src_x + t * (tgt_x - src_x)
+                y = src_y + t * (tgt_y - src_y)
                 return (x, y)
         
         elif rendering_type == "freeform":
@@ -3036,31 +3065,31 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 return (last_point[0], last_point[1])
             else:
                 # Fallback to linear interpolation
-                x = source_node.x + t * (target_node.x - source_node.x)
-                y = source_node.y + t * (target_node.y - source_node.y)
+                x = src_x + t * (tgt_x - src_x)
+                y = src_y + t * (tgt_y - src_y)
                 return (x, y)
         
         elif rendering_type == "nurbs":
             # For NURBS, use rational Bézier evaluation
             if edge.control_points and len(edge.control_points) >= 1:
                 # Create weighted control points: source -> edge control points -> target
-                ctrl_points = [(source_node.x, source_node.y, 1.0)]
+                ctrl_points = [(src_x, src_y, 1.0)]
                 for cp in edge.control_points:
                     ctrl_points.append((cp[0], cp[1], 3.0))  # Higher weight for control points
-                ctrl_points.append((target_node.x, target_node.y, 1.0))
+                ctrl_points.append((tgt_x, tgt_y, 1.0))
                 
                 return self.evaluate_rational_bezier_variable(ctrl_points, t)
             else:
                 # Fallback to linear interpolation
-                x = source_node.x + t * (target_node.x - source_node.x)
-                y = source_node.y + t * (target_node.y - source_node.y)
+                x = src_x + t * (tgt_x - src_x)
+                y = src_y + t * (tgt_y - src_y)
                 return (x, y)
         
         elif rendering_type == "polyline":
             # For polyline, use control points if available
             if edge.control_points and len(edge.control_points) >= 1:
                 # Create points list: source -> control_points -> target
-                points = [source_node] + [type('Point', (), {'x': cp[0], 'y': cp[1]})() for cp in edge.control_points] + [target_node]
+                points = [type('Point', (), {'x': src_x, 'y': src_y})()] + [type('Point', (), {'x': cp[0], 'y': cp[1]})() for cp in edge.control_points] + [type('Point', (), {'x': tgt_x, 'y': tgt_y})()]
                 num_segments = len(points) - 1
                 
                 if num_segments == 0:
@@ -3077,9 +3106,9 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 y = p0.y + local_t * (p1.y - p0.y)
                 return (x, y)
             else:
-                # Use default polyline algorithm
-                dx = target_node.x - source_node.x
-                dy = target_node.y - source_node.y
+                # Use default polyline algorithm between anchors
+                dx = tgt_x - src_x
+                dy = tgt_y - src_y
                 segments = 5
                 
                 # Find which segment we're in
@@ -3088,8 +3117,8 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 local_t = segment_t - segment_index
                 
                 # Linear interpolation with offset for middle segments
-                base_x = source_node.x + t * dx
-                base_y = source_node.y + t * dy
+                base_x = src_x + t * dx
+                base_y = src_y + t * dy
                 
                 # Add offset for segments in the middle
                 if 0 < segment_index < segments - 1:
@@ -3100,20 +3129,20 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
                 return (base_x, base_y)
         
         elif rendering_type == "bspline":
-            # For B-spline, use interpolating spline through all points
+            # For B-spline, use interpolating spline through all points between connection anchors
             if edge.control_points:
-                # Create interpolation points: source -> control points -> target
-                interpolation_points = [(source_node.x, source_node.y)] + edge.control_points + [(target_node.x, target_node.y)]
+                # Create interpolation points: anchors -> control points -> anchor
+                interpolation_points = [(src_x, src_y)] + edge.control_points + [(tgt_x, tgt_y)]
                 return self.evaluate_interpolating_spline(interpolation_points, t)
             else:
-                # Use default interpolation
-                dx = target_node.x - source_node.x
-                dy = target_node.y - source_node.y
+                # Use default interpolation based on anchors
+                dx = tgt_x - src_x
+                dy = tgt_y - src_y
                 interpolation_points = [
-                    (source_node.x, source_node.y),
-                    (source_node.x + dx * 0.33, source_node.y + dy * 0.33 - 20),
-                    (source_node.x + dx * 0.67, source_node.y + dy * 0.67 + 20),
-                    (target_node.x, target_node.y)
+                    (src_x, src_y),
+                    (src_x + dx * 0.33, src_y + dy * 0.33 - 20),
+                    (src_x + dx * 0.67, src_y + dy * 0.67 + 20),
+                    (tgt_x, tgt_y)
                 ]
                 return self.evaluate_interpolating_spline(interpolation_points, t)
         
