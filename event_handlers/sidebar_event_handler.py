@@ -1478,6 +1478,12 @@ def on_zoom_sensitivity_changed(main_window: "m_main_window.MainWindow", event):
     except Exception:
         pass
     main_window.update_canvas_zoom_sensitivity()
+    # Also update canvas base for smoother scaling responsiveness if provided
+    try:
+        if hasattr(main_window, 'canvas'):
+            main_window.canvas.set_zoom_sensitivity(main_window.zoom_sensitivity_field.GetValue())
+    except Exception:
+        pass
 
 
 def _on_zoom_input_mode_changed(main_window: "m_main_window.MainWindow", event):

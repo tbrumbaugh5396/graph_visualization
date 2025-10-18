@@ -100,6 +100,7 @@ class PropertyExpressionDialog(wx.Dialog):
         self.term_type_choice.SetSelection(0)
         self.update_value_choices()
         self.update_panels()
+
     
     def update_value_choices(self):
         """Update value choices based on term type."""

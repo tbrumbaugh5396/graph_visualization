@@ -8,9 +8,11 @@ creating, editing, and managing graphs with nodes and edges.
 
 import sys
 import os
+from utils.path_helpers import ensure_project_on_path, ensure_mvc_mvu_on_path
 
-# Add the project directory to the Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Ensure paths work for both source and package execution
+ensure_project_on_path(__file__)
+ensure_mvc_mvu_on_path()
 
 from app import GraphEditorApp
 

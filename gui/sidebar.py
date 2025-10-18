@@ -541,6 +541,21 @@ def setup_sidebar(main_window: "m_main_window.MainWindow"):
     wx.EVT_BUTTON, lambda evt:  main_window.adjust_zoom_sensitivity(0.1))
     main_window.zoom_sensitivity_field.Bind(wx.EVT_SPINCTRLDOUBLE,
                                     m_sidebar_event_handler.on_zoom_sensitivity_changed)
+    # Initialize field from persisted ZoomManager, if available
+    try:
+        if hasattr(main_window, 'managers') and hasattr(main_window.managers, 'zoom_manager'):
+            persisted_sens = float(main_window.managers.zoom_manager.get_sensitivity())
+            main_window.zoom_sensitivity_field.SetValue(persisted_sens)
+            # Apply to canvas immediately
+            import event_handlers.graph_canvas_zoom_event_handler as _zoom_ev
+            _zoom_ev.update_canvas_zoom_sensitivity(main_window)
+            # Optionally sync MVU model
+            if hasattr(main_window, 'mvu_adapter'):
+                from mvc_mvu.messages import make_message
+                import mvu.main_mvu as m_main_mvu
+                main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ZOOM_SENSITIVITY, value=persisted_sens))
+    except Exception:
+        pass
 
     zoom_sensitivity_sizer.Add( main_window.zoom_label, 0,
                                 wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
@@ -557,16 +572,28 @@ def setup_sidebar(main_window: "m_main_window.MainWindow"):
     main_window.zoom_input_choice = wx.Choice(movement_panel, choices=["Wheel", "Touchpad", "Both"])
     try:
         default_mode = "Wheel"
-        if hasattr(main_window, 'mvu_adapter'):
-            m = main_window.mvu_adapter.model
-            zmode = getattr(m, 'zoom_input_mode', 'wheel')
-            if zmode == 'touchpad':
-                default_mode = "Touchpad"
-            elif zmode == 'both':
-                default_mode = "Both"
-            else:
-                default_mode = "Wheel"
+        # Prefer persisted ZoomManager mode if present
+        if hasattr(main_window, 'managers') and hasattr(main_window.managers, 'zoom_manager'):
+            zmode = main_window.managers.zoom_manager.get_mode()
+        elif hasattr(main_window, 'mvu_adapter'):
+            zmode = getattr(main_window.mvu_adapter.model, 'zoom_input_mode', 'wheel')
+        else:
+            zmode = 'wheel'
+        if zmode == 'touchpad':
+            default_mode = "Touchpad"
+        elif zmode == 'both':
+            default_mode = "Both"
+        else:
+            default_mode = "Wheel"
         main_window.zoom_input_choice.SetStringSelection(default_mode)
+        # Apply to canvas immediately
+        if hasattr(main_window, 'canvas'):
+            main_window.canvas.zoom_input_mode = zmode
+        # Optionally sync MVU model
+        if hasattr(main_window, 'mvu_adapter'):
+            from mvc_mvu.messages import make_message
+            import mvu.main_mvu as m_main_mvu
+            main_window.mvu_adapter.dispatch(make_message(m_main_mvu.Msg.SET_ZOOM_INPUT_MODE, mode=zmode))
     except Exception:
         main_window.zoom_input_choice.SetStringSelection("Wheel")
     main_window.zoom_input_choice.Bind(wx.EVT_CHOICE, lambda evt: m_sidebar_event_handler._on_zoom_input_mode_changed(main_window, evt))

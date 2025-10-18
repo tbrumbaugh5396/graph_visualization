@@ -1,0 +1,5 @@
+[console_scripts]
+dependency-chart = main:main
+
+[gui_scripts]
+dependency-chart-gui = main:main

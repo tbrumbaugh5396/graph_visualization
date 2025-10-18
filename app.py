@@ -6,11 +6,9 @@ A comprehensive graph editing application built with wxPython that supports
 creating, editing, and managing graphs with nodes and edges.
 """
 
-
-print("🚀 DEBUG: main.py started - debug code is active!")
-
 import sys
 import os
+from utils.path_helpers import ensure_project_on_path, ensure_mvc_mvu_on_path
 
 # Check if wxPython is available
 try:
@@ -21,8 +19,9 @@ except ImportError:
     sys.exit(1)
 
 
-# Add the project directory to the Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Ensure paths work for both source and package execution
+ensure_project_on_path(__file__)
+ensure_mvc_mvu_on_path()
 
 from gui.main_window import MainWindow
 

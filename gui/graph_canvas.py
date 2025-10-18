@@ -61,6 +61,8 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
 
         # View state
         self.zoom = 1.0
+        # Base factor used for per-step zooming; lower => smoother
+        self.zoom_base = 1.12
         
         # Grid and snapping
         self.grid_style = "grid"  # "none", "grid", "dots"
@@ -324,10 +326,11 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             # Calculate a continuous zoom factor using fractional wheel steps for smoothness
             # One wheel 'notch' corresponds to rotation == delta. Use fractional exponent with sensitivity.
             frac_steps = (rotation / float(delta))
-            base_factor = 1.2  # base per-notch factor
+            base_factor = getattr(self, 'zoom_base', 1.12)
             # Use separate sensitivity for zoom-out to avoid oscillation from high-res wheels
             direction = 1.0 if frac_steps >= 0 else -1.0
-            effective_sensitivity = self.zoom_sensitivity * (0.85 if direction < 0 else 1.0)
+            smoothing_scale = 0.6  # smaller => smoother
+            effective_sensitivity = (self.zoom_sensitivity * smoothing_scale) * (0.9 if direction < 0 else 1.0)
             exponent = frac_steps * effective_sensitivity
             
             print(f"DEBUG: abs(rotation): {abs(rotation)}")
@@ -431,15 +434,16 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
             self.pan_suppressed = True
 
             # Use same base and sensitivity mapping as wheel to match behavior
-            base_factor = 1.2
+            base_factor = getattr(self, 'zoom_base', 1.12)
             # Heuristic: Some platforms emit a small delta (e.g., ±0.02) vs factor (>1 in, <1 out)
             if -0.3 <= magnification <= 0.3:
                 # Map tiny magnification deltas to "fractional steps" similar to wheel notches
                 # Choose k so that a typical delta (0.05) ≈ 1 step -> exponent ≈ 1 * sensitivity
-                k = 20.0
+                k = 12.0
                 frac_steps = magnification * k
                 direction = 1.0 if frac_steps >= 0 else -1.0
-                effective_sensitivity = self.zoom_sensitivity * (0.85 if direction < 0 else 1.0)
+                smoothing_scale = 0.6
+                effective_sensitivity = (self.zoom_sensitivity * smoothing_scale) * (0.9 if direction < 0 else 1.0)
                 exponent = frac_steps * effective_sensitivity
                 zoom_factor = pow(base_factor, exponent)
                 mode = "delta"
@@ -926,12 +930,14 @@ class GraphCanvas(wx.Panel, GraphCanvasPropertyNotifierMixin):
     def zoom_in_at_mouse(self):
         """Zoom in at current mouse position."""
 
-        self.zoom_at_point(1.2, self.current_mouse_pos)
+        base = getattr(self, 'zoom_base', 1.12)
+        self.zoom_at_point(base, self.current_mouse_pos)
 
     def zoom_out_at_mouse(self):
         """Zoom out at current mouse position."""
 
-        self.zoom_at_point(1.0 / 1.2, self.current_mouse_pos)
+        base = getattr(self, 'zoom_base', 1.12)
+        self.zoom_at_point(1.0 / base, self.current_mouse_pos)
 
     def reset_view(self):
         """Reset view to the saved default state (saved center, rotation, and zoom)."""

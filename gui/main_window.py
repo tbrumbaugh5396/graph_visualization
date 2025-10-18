@@ -9,18 +9,16 @@ from typing import Optional, List
 from utils.meta_graph_information import MetaGraphInformation
 from utils.display_settings import DisplaySettings
 from functools import partial
+from utils.path_helpers import ensure_project_on_path, ensure_mvc_mvu_on_path
 
 # Handle imports for both module and direct execution
 import sys
 
-# Add the parent directory to the path for direct execution
-if __name__ == "__main__":
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Ensure paths for both direct execution and package run
+ensure_project_on_path(__file__)
+ensure_mvc_mvu_on_path()
 
-# Ensure MVC_MVU framework (sibling repo) is importable
-MVC_MVU_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'MVC_MVU'))
-if os.path.isdir(MVC_MVU_DIR) and MVC_MVU_DIR not in sys.path:
-    sys.path.insert(0, MVC_MVU_DIR)
+# MVC_MVU path handled by utils.path_helpers
 
 # Use absolute imports for better compatibility
 # event handlers
