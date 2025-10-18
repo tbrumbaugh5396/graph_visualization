@@ -709,6 +709,30 @@ class MainWindow(wx.Frame):
         self.sidebar.Refresh()
         self.sidebar.Layout()
     
+    def update_curve_list(self):
+        """Delegate to sidebar event handler to refresh curve control list."""
+        try:
+            import event_handlers.sidebar_event_handler as _sidebar_evt
+            _sidebar_evt.update_curve_list(self)
+        except Exception:
+            pass
+
+    def update_bspline_list(self):
+        """Delegate to sidebar event handler to refresh B-spline control list."""
+        try:
+            import event_handlers.sidebar_event_handler as _sidebar_evt
+            _sidebar_evt.update_bspline_list(self)
+        except Exception:
+            pass
+
+    def update_composite_list(self):
+        """Delegate to composite segment panel to refresh composite segments list."""
+        try:
+            import gui.control_points_and_composite_segment_panel as _cp_panel
+            _cp_panel.update_composite_list(self)
+        except Exception:
+            pass
+    
 
     def zoom_to_fit(self):
         """Zoom to fit all items."""

@@ -2144,49 +2144,103 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
 
     # For hyperedges, draw all connections
     if edge.is_hyperedge:
-        # Draw connections from all source nodes to the from connection point
+        # Resolve nodes
         source_nodes = [graph_canvas.graph.get_node(node_id) for node_id in edge.source_ids if graph_canvas.graph.get_node(node_id)]
         target_nodes = [graph_canvas.graph.get_node(node_id) for node_id in edge.target_ids if graph_canvas.graph.get_node(node_id)]
-        
         if not source_nodes or not target_nodes:
             return
-            
-        # Use the first nodes as the main edge for calculating connection points
         source_node = source_nodes[0]
         target_node = target_nodes[0]
-        
-        # Calculate the main edge line for connection points
-        source_screen = graph_canvas.world_to_screen(source_node.x, source_node.y)
-        target_screen = graph_canvas.world_to_screen(target_node.x, target_node.y)
-        source_adjusted = graph_canvas.calculate_line_endpoint(source_node, target_node,
-                                                    source_screen, target_screen, True, edge)
-        target_adjusted = graph_canvas.calculate_line_endpoint(target_node, source_node,
-                                                    target_screen, source_screen, False, edge)
-        
-        # Calculate connection points
-        dx = target_adjusted[0] - source_adjusted[0]
-        dy = target_adjusted[1] - source_adjusted[1]
-        from_point = (source_adjusted[0] + dx * edge.from_connection_point,
-                    source_adjusted[1] + dy * edge.from_connection_point)
-        to_point = (source_adjusted[0] + dx * edge.to_connection_point,
-                    source_adjusted[1] + dy * edge.to_connection_point)
-        
-        # Draw lines from all source nodes to the from connection point
-        for node in source_nodes:
-            node_screen = graph_canvas.world_to_screen(node.x, node.y)
-            node_adjusted = graph_canvas.calculate_line_endpoint(node, source_node,
-                                                        node_screen, source_screen, True, edge)
-            draw_edge_segment(graph_canvas, dc, node_adjusted, from_point, edge)
-        
-        # Draw lines from all target nodes to the to connection point
-        for node in target_nodes:
-            node_screen = graph_canvas.world_to_screen(node.x, node.y)
-            node_adjusted = graph_canvas.calculate_line_endpoint(node, target_node,
-                                                        node_screen, target_screen, True, edge)
-            draw_edge_segment(graph_canvas, dc, node_adjusted, to_point, edge)
-        
-        # Draw the main segment between connection points
-        draw_edge_segment(graph_canvas, dc, from_point, to_point, edge)
+
+        # Compute anchor endpoints in WORLD coordinates (blue dots for main edge)
+        if hasattr(graph_canvas, 'get_edge_anchor_endpoints_world'):
+            (sxw, syw), (txw, tyw) = graph_canvas.get_edge_anchor_endpoints_world(edge, source_node, target_node)
+        else:
+            sxw, syw = source_node.x, source_node.y
+            txw, tyw = target_node.x, target_node.y
+
+        # Connection points in WORLD coords
+        dxw = txw - sxw
+        dyw = tyw - syw
+        from_w = (sxw + dxw * edge.from_connection_point, syw + dyw * edge.from_connection_point)
+        to_w = (sxw + dxw * edge.to_connection_point,   syw + dyw * edge.to_connection_point)
+
+        gc = dc.GetGraphicsContext()
+        if gc:
+            # Pen
+            sel = edge.selected
+            base = edge.color
+            color = wx.Colour(*(base if not sel else (min(base[0]+50,255), min(base[1]+50,255), min(base[2]+50,255))))
+            gc.SetPen(wx.Pen(color, max(1, int(edge.width))))
+
+            # Helper to anchor from node boundary toward a target world point (rectangle math)
+            def anchor_from_node(node_obj, target_pt_w):
+                nx, ny = float(node_obj.x), float(node_obj.y)
+                tx, ty = float(target_pt_w[0]), float(target_pt_w[1])
+                dx = tx - nx
+                dy = ty - ny
+                length = math.sqrt(dx*dx + dy*dy)
+                if length == 0:
+                    return (nx, ny)
+                dx /= length
+                dy /= length
+                node_w = float(getattr(node_obj, 'width', 0))
+                node_h = float(getattr(node_obj, 'height', 0))
+                dist_v = (node_w / 2.0) / abs(dx) if abs(dx) > 1e-6 else float('inf')
+                dist_h = (node_h / 2.0) / abs(dy) if abs(dy) > 1e-6 else float('inf')
+                edge_dist = min(dist_v, dist_h)
+                return (nx + dx * edge_dist, ny + dy * edge_dist)
+
+            # Source branches: primary starts at (sxw, syw), others from their anchored perimeter
+            for node in source_nodes:
+                start_w = (sxw, syw) if node.id == getattr(edge, 'source_id', None) else anchor_from_node(node, from_w)
+                path = gc.CreatePath()
+                path.MoveToPoint(start_w[0], start_w[1])
+                path.AddLineToPoint(from_w[0], from_w[1])
+                gc.StrokePath(path)
+
+            # Target branches
+            for node in target_nodes:
+                start_w = (txw, tyw) if node.id == getattr(edge, 'target_id', None) else anchor_from_node(node, to_w)
+                path = gc.CreatePath()
+                path.MoveToPoint(start_w[0], start_w[1])
+                path.AddLineToPoint(to_w[0], to_w[1])
+                gc.StrokePath(path)
+
+            # Main segment
+            path = gc.CreatePath()
+            path.MoveToPoint(from_w[0], from_w[1])
+            path.AddLineToPoint(to_w[0], to_w[1])
+            gc.StrokePath(path)
+
+            # Label at midpoint (world coords)
+            if edge.text and getattr(graph_canvas, 'show_edge_labels', True):
+                mxw = (from_w[0] + to_w[0]) / 2.0
+                myw = (from_w[1] + to_w[1]) / 2.0
+                gc.SetFont(wx.Font(max(8, int(edge.font_size)), wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD), wx.Colour(*edge.text_color))
+                gc.DrawText(edge.text, mxw, myw)
+
+            return
+        else:
+            # Fallback: use screen-space anchors derived from world anchors
+            source_screen = graph_canvas.world_to_screen(source_node.x, source_node.y)
+            target_screen = graph_canvas.world_to_screen(target_node.x, target_node.y)
+            source_adjusted = graph_canvas.calculate_line_endpoint(source_node, target_node, source_screen, target_screen, True, edge)
+            target_adjusted = graph_canvas.calculate_line_endpoint(target_node, source_node, target_screen, source_screen, False, edge)
+            dx = target_adjusted[0] - source_adjusted[0]
+            dy = target_adjusted[1] - source_adjusted[1]
+            from_point = (source_adjusted[0] + dx * edge.from_connection_point, source_adjusted[1] + dy * edge.from_connection_point)
+            to_point = (source_adjusted[0] + dx * edge.to_connection_point,   source_adjusted[1] + dy * edge.to_connection_point)
+            for node in source_nodes:
+                node_screen = graph_canvas.world_to_screen(node.x, node.y)
+                node_adjusted = graph_canvas.calculate_line_endpoint(node, source_node, node_screen, source_screen, True, edge)
+                draw_edge_segment(graph_canvas, dc, node_adjusted, from_point, edge)
+            for node in target_nodes:
+                node_screen = graph_canvas.world_to_screen(node.x, node.y)
+                node_adjusted = graph_canvas.calculate_line_endpoint(node, target_node, node_screen, target_screen, True, edge)
+                draw_edge_segment(graph_canvas, dc, node_adjusted, to_point, edge)
+            draw_edge_segment(graph_canvas, dc, from_point, to_point, edge)
+            return
         
         # Draw arrows for hyperedges
         if edge.directed:
