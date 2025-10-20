@@ -2142,8 +2142,65 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
     if not graph_canvas.show_nested_edges and is_redirected:
         return
 
-    # For hyperedges, draw all connections
+    # For hyperedges, draw according to selected visualization, influenced by selected graph type
     if edge.is_hyperedge:
+        # Handle non-line visualizations first
+        hv = getattr(edge, 'hyperedge_visualization', 'lines') or 'lines'
+        # Drive hv by current graph type: Ubergraph -> prefer ubergraph; Hypergraph -> prefer lines
+        try:
+            graph_type = getattr(graph_canvas, 'selected_graph_type', 3)
+            # Assume 6/7 are Ubergraph variants per existing UI
+            if graph_type in (6, 7):
+                hv = 'ubergraph'
+            # Optionally normalize back to lines for classic hypergraph
+            elif graph_type == 4 and hv == 'ubergraph':
+                hv = 'lines'
+        except Exception:
+            pass
+        sel = edge.selected
+        base = edge.color if hasattr(edge, 'color') else (40, 40, 40)
+        color = wx.Colour(*(base if not sel else (min(base[0]+50,255), min(base[1]+50,255), min(base[2]+50,255))))
+
+        if hv == 'ubergraph':
+            # Draw uberedge as a node or edge-to-edge/node graph depending on view
+            view = getattr(edge, 'hyperedge_view', 'standard') or 'standard'
+            # If graph is in Ubergraph mode and view not explicitly set, prefer line_graph
+            try:
+                if getattr(graph_canvas, 'selected_graph_type', 3) in (6, 7) and view == 'standard':
+                    view = 'line_graph'
+            except Exception:
+                pass
+            if view == 'line_graph':
+                draw_line_graph_hyperedge(graph_canvas, dc, edge, color)
+                return
+            elif view == 'derivative_graph':
+                draw_derivative_graph_hyperedge(graph_canvas, dc, edge, color)
+                return
+            else:
+                draw_ubergraph_hyperedge(graph_canvas, dc, edge, color)
+                return
+        elif hv == 'curved_surface':
+            # For curved surface we need connection endpoints; approximate with source/target centers
+            source_node = graph_canvas.graph.get_node(edge.source_id)
+            target_node = graph_canvas.graph.get_node(edge.target_id)
+            if source_node and target_node:
+                sp = graph_canvas.world_to_screen(source_node.x, source_node.y)
+                tp = graph_canvas.world_to_screen(target_node.x, target_node.y)
+                draw_curved_surface(graph_canvas, dc, sp, tp, edge, color)
+            return
+        elif hv == 'blob_boundary':
+            draw_blob_boundary(graph_canvas, dc, edge, color)
+            return
+        elif hv == 'polygon':
+            draw_polygon_hyperedge(graph_canvas, dc, edge, color)
+            return
+        elif hv == 'zykov':
+            draw_zykov_hyperedge(graph_canvas, dc, edge, color)
+            return
+        elif hv == 'radial':
+            draw_radial_hyperedge(graph_canvas, dc, edge, color)
+            return
+        # else: default to line-based visualization below
         # Resolve nodes
         source_nodes = [graph_canvas.graph.get_node(node_id) for node_id in edge.source_ids if graph_canvas.graph.get_node(node_id)]
         target_nodes = [graph_canvas.graph.get_node(node_id) for node_id in edge.target_ids if graph_canvas.graph.get_node(node_id)]
@@ -2151,7 +2208,7 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
             return
         source_node = source_nodes[0]
         target_node = target_nodes[0]
-
+        
         # Compute anchor endpoints in WORLD coordinates (blue dots for main edge)
         if hasattr(graph_canvas, 'get_edge_anchor_endpoints_world'):
             (sxw, syw), (txw, tyw) = graph_canvas.get_edge_anchor_endpoints_world(edge, source_node, target_node)
@@ -2168,9 +2225,6 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
         gc = dc.GetGraphicsContext()
         if gc:
             # Pen
-            sel = edge.selected
-            base = edge.color
-            color = wx.Colour(*(base if not sel else (min(base[0]+50,255), min(base[1]+50,255), min(base[2]+50,255))))
             gc.SetPen(wx.Pen(color, max(1, int(edge.width))))
 
             # Helper to anchor from node boundary toward a target world point (rectangle math)
@@ -2221,7 +2275,7 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
                 gc.DrawText(edge.text, mxw, myw)
 
             return
-        else:
+        if not gc:
             # Fallback: use screen-space anchors derived from world anchors
             source_screen = graph_canvas.world_to_screen(source_node.x, source_node.y)
             target_screen = graph_canvas.world_to_screen(target_node.x, target_node.y)
@@ -2234,7 +2288,7 @@ def draw_edge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge: "m_edge.Edge
             for node in source_nodes:
                 node_screen = graph_canvas.world_to_screen(node.x, node.y)
                 node_adjusted = graph_canvas.calculate_line_endpoint(node, source_node, node_screen, source_screen, True, edge)
-                draw_edge_segment(graph_canvas, dc, node_adjusted, from_point, edge)
+            draw_edge_segment(graph_canvas, dc, node_adjusted, from_point, edge)
             for node in target_nodes:
                 node_screen = graph_canvas.world_to_screen(node.x, node.y)
                 node_adjusted = graph_canvas.calculate_line_endpoint(node, target_node, node_screen, target_screen, True, edge)
@@ -2489,6 +2543,68 @@ def draw_edge_endpoint_dots(graph_canvas: "m_graph_canvas.GraphCanvas", dc, sour
     dc.SetPen(wx.Pen(wx.Colour(0, 0, 150), 2))     # Dark blue border
     
     if edge and edge.is_hyperedge:
+        # For ubergraph, draw blue anchor dots for segment endpoints based on anchor math
+        if getattr(edge, 'hyperedge_visualization', '') == 'ubergraph' and edge.selected:
+            try:
+                # Compute anchor endpoints for the main edge in screen space
+                source_node = graph_canvas.graph.get_node(edge.source_id) if edge.source_id else None
+                target_node = graph_canvas.graph.get_node(edge.target_id) if edge.target_id else None
+                if source_node and target_node:
+                    ss = graph_canvas.world_to_screen(source_node.x, source_node.y)
+                    ts = graph_canvas.world_to_screen(target_node.x, target_node.y)
+                    sa = graph_canvas.calculate_line_endpoint(source_node, target_node, ss, ts, True, edge)
+                    ta = graph_canvas.calculate_line_endpoint(target_node, source_node, ts, ss, False, edge)
+                else:
+                    sa = source_pos
+                    ta = target_pos
+
+                # Uberedge box-side anchor based on anchor mode: project center toward each attached node
+                def box_anchor_screen(toward_world):
+                    cx, cy = float(edge.uber_x), float(edge.uber_y)
+                    w2 = float(getattr(edge, 'uber_width', 60.0)) / 2.0
+                    h2 = float(getattr(edge, 'uber_height', 40.0)) / 2.0
+                    vx = float(toward_world[0]) - cx
+                    vy = float(toward_world[1]) - cy
+                    if abs(vx) < 1e-9 and abs(vy) < 1e-9:
+                        return graph_canvas.world_to_screen(cx, cy)
+                    if getattr(edge, 'uber_shape', 'rectangle') == 'ellipse':
+                        rx, ry = w2, h2
+                        t = 1.0 / math.sqrt((vx*vx)/(rx*rx) + (vy*vy)/(ry*ry))
+                        return graph_canvas.world_to_screen(cx + vx * t, cy + vy * t)
+                    # rectangle intersection
+                    dx = vx; dy = vy
+                    t_vals = []
+                    if abs(dx) > 1e-9:
+                        t_vals.append(( w2 - 0.0) / dx)
+                        t_vals.append((-w2 - 0.0) / dx)
+                    if abs(dy) > 1e-9:
+                        t_vals.append(( h2 - 0.0) / dy)
+                        t_vals.append((-h2 - 0.0) / dy)
+                    candidates = []
+                    for t in t_vals:
+                        if t <= 0: continue
+                        px = cx + dx * t; py = cy + dy * t
+                        if abs(px - cx) <= w2 + 1e-6 and abs(py - cy) <= h2 + 1e-6:
+                            candidates.append((px, py, t))
+                    if not candidates:
+                        return graph_canvas.world_to_screen(cx, cy)
+                    candidates.sort(key=lambda p: p[2])
+                    return graph_canvas.world_to_screen(candidates[0][0], candidates[0][1])
+
+                # For primary source/target
+                ex1 = box_anchor_screen((source_node.x, source_node.y)) if source_node else None
+                ex2 = box_anchor_screen((target_node.x, target_node.y)) if target_node else None
+
+                # Draw anchors for node↔uberedge segments: blue at node anchor and blue at uberedge box anchor(s)
+                dc.DrawCircle(int(sa[0]), int(sa[1]), dot_radius)
+                dc.DrawCircle(int(ta[0]), int(ta[1]), dot_radius)
+                if ex1:
+                    dc.DrawCircle(int(ex1[0]), int(ex1[1]), dot_radius)
+                if ex2:
+                    dc.DrawCircle(int(ex2[0]), int(ex2[1]), dot_radius)
+            except Exception:
+                pass
+            return
         # Draw dots for all source node connections
         source_node = graph_canvas.graph.get_node(edge.source_id)
         target_node = graph_canvas.graph.get_node(edge.target_id)
@@ -2587,37 +2703,226 @@ def draw_nested_edge_indicator(graph_canvas: "m_graph_canvas.GraphCanvas", dc, s
 
    
 def draw_line_graph_hyperedge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge, color):
-    """Draw a line graph representation of the hyperedge (edges connected if they share nodes)."""
+    """Draw a line graph representation of the hyperedge (edges connected if they share nodes).
+    Adds support for parallel uberedges (offsets) and self-loops (ellipse).
+    """
 
-    # Find all edges that share nodes with this edge
+    # Build connections ONLY from explicit metadata; do not auto-link by shared nodes
     connected_edges = []
-    for other_edge in graph_canvas.graph.get_all_edges():
-        if other_edge.id != edge.id and other_edge.is_hyperedge:
-            if edge.shares_nodes_with(other_edge):
-                connected_edges.append(other_edge)
-    
-    # Draw lines to connected edges
+    explicit_list = []
+    if hasattr(edge, 'metadata') and edge.metadata:
+        try:
+            explicit_list = list(edge.metadata.get('connected_uberedges', []))
+        except Exception:
+            explicit_list = []
+    # Map target IDs to edge objects (preserve duplicates for parallel links)
+    for target_id in explicit_list:
+        oe = None
+        for cand in graph_canvas.graph.get_all_edges():
+            if cand.id == target_id and cand.is_hyperedge:
+                oe = cand
+                break
+        if oe is not None:
+            connected_edges.append(oe)
+
     gc = dc.GetGraphicsContext()
+    if gc:
+        def _draw_world_arrow(x1, y1, x2, y2, pen_color, width):
+            dx = float(x2) - float(x1)
+            dy = float(y2) - float(y1)
+            seg_len = math.hypot(dx, dy)
+            if seg_len <= 1e-6:
+                return
+            ux = dx / seg_len
+            uy = dy / seg_len
+            px = -uy
+            py = ux
+            arrow_size = max(8.0, float(width) * 3.0)
+            arrow_width = arrow_size * 0.5
+            tip_x = float(x2)
+            tip_y = float(y2)
+            bl_x = tip_x - arrow_size * ux + arrow_width * px
+            bl_y = tip_y - arrow_size * uy + arrow_width * py
+            br_x = tip_x - arrow_size * ux - arrow_width * px
+            br_y = tip_y - arrow_size * uy - arrow_width * py
+            ap = gc.CreatePath()
+            ap.MoveToPoint(tip_x, tip_y)
+            ap.AddLineToPoint(bl_x, bl_y)
+            ap.AddLineToPoint(br_x, br_y)
+            ap.CloseSubpath()
+            gc.SetBrush(wx.Brush(pen_color))
+            gc.SetPen(wx.Pen(pen_color, 1))
+            gc.FillPath(ap)
+            gc.StrokePath(ap)
+
+        # Track counts to offset parallel links consistently
+        pair_total = {}
+        for oe in connected_edges:
+            pair = tuple(sorted([edge.id, oe.id]))
+            pair_total[pair] = pair_total.get(pair, 0) + 1
+
+        def _box_anchor_world(ebox, toward_x, toward_y):
+            cx, cy = float(ebox.uber_x), float(ebox.uber_y)
+            w2 = float(getattr(ebox, 'uber_width', 60.0)) / 2.0
+            h2 = float(getattr(ebox, 'uber_height', 40.0)) / 2.0
+            vx = float(toward_x) - cx
+            vy = float(toward_y) - cy
+            if abs(vx) < 1e-9 and abs(vy) < 1e-9:
+                return cx, cy
+            if getattr(ebox, 'uber_shape', 'rectangle') == 'ellipse':
+                # Ellipse boundary intersection
+                rx, ry = w2, h2
+                t = 1.0 / math.sqrt((vx*vx)/(rx*rx) + (vy*vy)/(ry*ry))
+                return cx + vx * t, cy + vy * t
+            # Rectangle intersection
+            dx = vx; dy = vy
+            t_vals = []
+            if abs(dx) > 1e-9:
+                t_vals.append(( w2 - 0.0) / dx)
+                t_vals.append((-w2 - 0.0) / dx)
+            if abs(dy) > 1e-9:
+                t_vals.append(( h2 - 0.0) / dy)
+                t_vals.append((-h2 - 0.0) / dy)
+            candidates = []
+            for t in t_vals:
+                if t <= 0:
+                    continue
+                px = cx + dx * t
+                py = cy + dy * t
+                if abs(px - cx) <= w2 + 1e-6 and abs(py - cy) <= h2 + 1e-6:
+                    candidates.append((px, py, t))
+            if not candidates:
+                return cx, cy
+            candidates.sort(key=lambda p: p[2])
+            return candidates[0][0], candidates[0][1]
+
+        pair_seen = {}
     for other_edge in connected_edges:
-        # Draw line from this edge's center to other edge's center
-        screen_x = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
-        other_screen = graph_canvas.world_to_screen(other_edge.uber_x, other_edge.uber_y)
-        
-        path = gc.CreatePath()
-        path.MoveToPoint(screen_x[0], screen_x[1])
-        path.AddLineToPoint(other_screen[0], other_screen[1])
-        
-        # Use a blend of both edge colors
-        blend_color = wx.Colour(
-            (color.Red() + other_edge.color[0]) // 2,
-            (color.Green() + other_edge.color[1]) // 2,
-            (color.Blue() + other_edge.color[2]) // 2
-        )
+        # Self-loop: draw ellipse around this uberedge center
+        if other_edge.id == edge.id:
+            continue
+
+        pair = tuple(sorted([edge.id, other_edge.id]))
+        seen = pair_seen.get(pair, 0)
+        total = pair_total.get(pair, 1)
+        pair_seen[pair] = seen + 1
+
+        # Pen color blending
+        blend_color = wx.Colour((color.Red() + other_edge.color[0]) // 2, (color.Green() + other_edge.color[1]) // 2, (color.Blue() + other_edge.color[2]) // 2)
         gc.SetPen(wx.Pen(blend_color, max(1, int(edge.width * graph_canvas.zoom))))
-        gc.StrokePath(path)
+
+        # Self-loop case (explicit connection to self recorded separately, handled below)
+        if other_edge.id == edge.id:
+            continue
+
+        # Compute offset for parallel edges
+        dx = float(other_edge.uber_x) - float(edge.uber_x)
+        dy = float(other_edge.uber_y) - float(edge.uber_y)
+        length = math.hypot(dx, dy)
+        nx, ny = (0.0, 1.0)
+        if length > 1e-6:
+            ux, uy = dx / length, dy / length
+            nx, ny = -uy, ux
+        offset_step = max(6.0, float(edge.width))
+        # Center offsets around zero for multiple parallels
+        offset_index = seen - (total - 1) / 2.0
+        ox = nx * offset_step * offset_index
+        oy = ny * offset_step * offset_index
+
+        # Compute anchors on each uberedge box toward the other
+        ax1, ay1 = _box_anchor_world(edge, float(other_edge.uber_x) + ox, float(other_edge.uber_y) + oy)
+        ax2, ay2 = _box_anchor_world(other_edge, float(edge.uber_x) + ox, float(edge.uber_y) + oy)
+        # Draw segment honoring rendering type (screen space); use per-link control points if present
+        s1 = graph_canvas.world_to_screen(ax1, ay1)
+        s2 = graph_canvas.world_to_screen(ax2, ay2)
+        # Temporarily pop world transform for screen-space helpers
+        popped = False
+        try:
+            gc.PopState()
+            popped = True
+        except Exception:
+            popped = False
+        try:
+            seg_cp = []
+            try:
+                if hasattr(edge, 'metadata') and isinstance(edge.metadata, dict):
+                    cp_map = edge.metadata.get('segment_cp_edges', {}) or {}
+                    seg_cp = cp_map.get(str(other_edge.id), []) or []
+            except Exception:
+                seg_cp = []
+            original_cp = getattr(edge, 'control_points', None)
+            if seg_cp:
+                edge.control_points = seg_cp
+            draw_edge_by_type(graph_canvas, dc, (int(s1[0]), int(s1[1])), (int(s2[0]), int(s2[1])), edge, pen_color=wx.Colour((color.Red() + other_edge.color[0]) // 2, (color.Green() + other_edge.color[1]) // 2, (color.Blue() + other_edge.color[2]) // 2))
+        finally:
+            if popped:
+                try:
+                    size = graph_canvas.GetSize()
+                    center_x = size.width / 2.0
+                    center_y = size.height / 2.0
+                    gc.PushState()
+                    gc.Translate(center_x + graph_canvas.pan_x, center_y + graph_canvas.pan_y)
+                    if getattr(graph_canvas, 'world_rotation', 0.0) != 0.0:
+                        gc.Rotate(math.radians(graph_canvas.world_rotation))
+                    gc.Scale(graph_canvas.zoom, graph_canvas.zoom)
+                except Exception:
+                    pass
+            # Restore edge control points
+            try:
+                edge.control_points = original_cp
+            except Exception:
+                pass
+        if getattr(edge, 'directed', True):
+            _draw_world_arrow(ax1, ay1, ax2, ay2, blend_color, max(1, int(edge.width * graph_canvas.zoom)))
+
+        # Draw explicit self-loop(s) as ellipses around the uberedge
+        self_loops = [tid for tid in explicit_list if tid == edge.id]
+        if self_loops:
+            loop_count = len(self_loops)
+            base_r = max(10.0, float(edge.uber_width) * 0.45)
+            for i in range(loop_count):
+                scale = 1.0 + i * 0.2  # nested loops slightly larger
+                rx = base_r * scale
+                ry = base_r * 1.2 * scale
+                ex = float(edge.uber_x)
+                ey = float(edge.uber_y)
+                path = gc.CreatePath()
+                path.AddEllipse(ex - rx, ey - ry, rx * 2.0, ry * 2.0)
+                loop_pen = wx.Colour(150, 150, 150)
+                gc.SetPen(wx.Pen(loop_pen, max(1, int(edge.width * graph_canvas.zoom))))
+                gc.StrokePath(path)
+                # Arrow/yellow dot position along ellipse can be extended later (kept at top for now)
+                if getattr(edge, 'directed', True):
+                    theta = -math.pi / 2.0
+                    tip_x = ex + rx * math.cos(theta)
+                    tip_y = ey + ry * math.sin(theta)
+                    tx = -rx * math.sin(theta)
+                    ty =  ry * math.cos(theta)
+                    tlen = math.hypot(tx, ty)
+                    if tlen > 1e-6:
+                        ux = tx / tlen
+                        uy = ty / tlen
+                        base_x = tip_x - ux * 1.0
+                        base_y = tip_y - uy * 1.0
+                        _draw_world_arrow(base_x, base_y, tip_x, tip_y, loop_pen, max(1, int(edge.width * graph_canvas.zoom)))
+                # force refresh if there were self loops (to show immediately after creation)
+                try:
+                    graph_canvas.graph_modified.emit()
+                except Exception:
+                    pass
+    else:
+        # Fallback: draw in screen space if no GC
+        # Simple straight line without parallel offsets
+        for other_edge in connected_edges:
+            if other_edge.id == edge.id:
+                continue
+            s1 = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
+            s2 = graph_canvas.world_to_screen(other_edge.uber_x, other_edge.uber_y)
+            dc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom))))
+            dc.DrawLine(int(s1[0]), int(s1[1]), int(s2[0]), int(s2[1]))
     
     # Draw the edge as a node (reuse ubergraph node drawing)
-    graph_canvas.draw_ubergraph_hyperedge(dc, edge, color)
+    draw_ubergraph_hyperedge(graph_canvas, dc, edge, color)
 
 
 def draw_derivative_graph_hyperedge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge, color):
@@ -2667,107 +2972,286 @@ def draw_derivative_graph_hyperedge(graph_canvas: "m_graph_canvas.GraphCanvas", 
 
 
 def draw_ubergraph_hyperedge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge, color):
-    """Draw a hyperedge as a node with connections to its nodes."""
+    """Draw a hyperedge as a node with connections to its nodes (WORLD coords)."""
 
-    # Draw the edge as a node
-    if edge.uber_shape == "rectangle":
-        # Draw rectangle
-        screen_x = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
-        width = int(edge.uber_width * graph_canvas.zoom)
-        height = int(edge.uber_height * graph_canvas.zoom)
-        
-        # Fill
-        if edge.selected:
-            dc.SetBrush(wx.Brush(wx.Colour(255, 255, 0)))  # Yellow for selected
-        else:
-            alpha = 128
-            fill_color = wx.Colour(color.Red(), color.Green(), color.Blue(), alpha)
-            dc.SetBrush(wx.Brush(fill_color))
-        
-        # Border
-        dc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom))))
-        
-        # Draw the rectangle
-        dc.DrawRectangle(screen_x[0] - width//2, screen_x[1] - height//2, width, height)
-    else:  # ellipse
-        # Draw ellipse
-        screen_x = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
-        width = int(edge.uber_width * graph_canvas.zoom)
-        height = int(edge.uber_height * graph_canvas.zoom)
-        
-        # Fill
-        if edge.selected:
-            dc.SetBrush(wx.Brush(wx.Colour(255, 255, 0)))  # Yellow for selected
-        else:
-            alpha = 128
-            fill_color = wx.Colour(color.Red(), color.Green(), color.Blue(), alpha)
-            dc.SetBrush(wx.Brush(fill_color))
-        
-        # Border
-        dc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom))))
-        
-        # Draw the ellipse
-        dc.DrawEllipse(screen_x[0] - width//2, screen_x[1] - height//2, width, height)
-    
-    # Draw edge text
-    if edge.text:
-        dc.SetTextForeground(wx.Colour(*edge.text_color))
-        dc.SetFont(wx.Font(edge.font_size, wx.FONTFAMILY_DEFAULT,
-                            wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
-        text_width, text_height = dc.GetTextExtent(edge.text)
-        screen_x = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
-        dc.DrawText(edge.text,
-                    screen_x[0] - text_width//2,
-                    screen_x[1] - text_height//2)
-    
-    # Draw connections to nodes
     gc = dc.GetGraphicsContext()
-    
-    # Draw lines to source nodes
-    if edge.source_id:
-        source_node = graph_canvas.graph.get_node(edge.source_id)
-        if source_node:
-            source_screen = graph_canvas.world_to_screen(source_node.x, source_node.y)
-            screen_x = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
+    if gc:
+        def _draw_world_arrow(x1, y1, x2, y2, pen_color, width):
+            dx = float(x2) - float(x1)
+            dy = float(y2) - float(y1)
+            seg_len = math.hypot(dx, dy)
+            if seg_len <= 1e-6:
+                return
+            ux = dx / seg_len
+            uy = dy / seg_len
+            px = -uy
+            py = ux
+            arrow_size = max(8.0, float(width) * 3.0)
+            arrow_width = arrow_size * 0.5
+            tip_x = float(x2)
+            tip_y = float(y2)
+            bl_x = tip_x - arrow_size * ux + arrow_width * px
+            bl_y = tip_y - arrow_size * uy + arrow_width * py
+            br_x = tip_x - arrow_size * ux - arrow_width * px
+            br_y = tip_y - arrow_size * uy - arrow_width * py
+            ap = gc.CreatePath()
+            ap.MoveToPoint(tip_x, tip_y)
+            ap.AddLineToPoint(bl_x, bl_y)
+            ap.AddLineToPoint(br_x, br_y)
+            ap.CloseSubpath()
+            gc.SetBrush(wx.Brush(pen_color))
+            gc.SetPen(wx.Pen(pen_color, 1))
+            gc.FillPath(ap)
+            gc.StrokePath(ap)
+        # Fill and stroke setup
+        if edge.selected:
+            gc.SetBrush(wx.Brush(wx.Colour(255, 255, 0)))  # Yellow for selected
+        else:
+            alpha = 128
+            fill_color = wx.Colour(color.Red(), color.Green(), color.Blue(), alpha)
+            gc.SetBrush(wx.Brush(fill_color))
+        gc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom))))
+
+        xw, yw = float(edge.uber_x), float(edge.uber_y)
+        w, h = float(edge.uber_width), float(edge.uber_height)
+
+        # Draw shape in world coords
+        if edge.uber_shape == "rectangle":
             path = gc.CreatePath()
-            path.MoveToPoint(source_screen[0], source_screen[1])
-            path.AddLineToPoint(screen_x[0], screen_x[1])
-            gc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom))))
+            path.AddRectangle(xw - w/2.0, yw - h/2.0, w, h)
+            gc.FillPath(path)
             gc.StrokePath(path)
-    
-    for node_id in edge.source_ids:
-        node = graph_canvas.graph.get_node(node_id)
-        if node:
-            node_screen = graph_canvas.world_to_screen(node.x, node.y)
-            screen_x = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
+        else:
             path = gc.CreatePath()
-            path.MoveToPoint(node_screen[0], node_screen[1])
-            path.AddLineToPoint(screen_x[0], screen_x[1])
-            gc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom))))
+            path.AddEllipse(xw - w/2.0, yw - h/2.0, w, h)
+            gc.FillPath(path)
             gc.StrokePath(path)
+
+        # Label at center
+        if edge.text:
+            gc.SetFont(wx.Font(max(8, int(edge.font_size)), wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL), wx.Colour(*edge.text_color))
+            gc.DrawText(edge.text, xw, yw)
+
+        # Helpers for anchor placement
+        def _box_anchor_world(ebox, toward_x, toward_y):
+            cx, cy = float(ebox.uber_x), float(ebox.uber_y)
+            w2 = float(getattr(ebox, 'uber_width', 60.0)) / 2.0
+            h2 = float(getattr(ebox, 'uber_height', 40.0)) / 2.0
+            vx = float(toward_x) - cx
+            vy = float(toward_y) - cy
+            if abs(vx) < 1e-9 and abs(vy) < 1e-9:
+                return cx, cy
+            if getattr(ebox, 'uber_shape', 'rectangle') == 'ellipse':
+                rx, ry = w2, h2
+                t = 1.0 / math.sqrt((vx*vx)/(rx*rx) + (vy*vy)/(ry*ry))
+                return cx + vx * t, cy + vy * t
+            dx = vx; dy = vy
+            t_vals = []
+            if abs(dx) > 1e-9:
+                t_vals.append(( w2 - 0.0) / dx)
+                t_vals.append((-w2 - 0.0) / dx)
+            if abs(dy) > 1e-9:
+                t_vals.append(( h2 - 0.0) / dy)
+                t_vals.append((-h2 - 0.0) / dy)
+            candidates = []
+            for t in t_vals:
+                if t <= 0: continue
+                px = cx + dx * t; py = cy + dy * t
+                if abs(px - cx) <= w2 + 1e-6 and abs(py - cy) <= h2 + 1e-6:
+                    candidates.append((px, py, t))
+            if not candidates:
+                return cx, cy
+            candidates.sort(key=lambda p: p[2])
+            return candidates[0][0], candidates[0][1]
+
+        def _node_anchor_world(node_obj, toward_x, toward_y):
+            nx, ny = float(node_obj.x), float(node_obj.y)
+            node_w = float(getattr(node_obj, 'width', 0.0))
+            node_h = float(getattr(node_obj, 'height', 0.0))
+            vx = float(toward_x) - nx
+            vy = float(toward_y) - ny
+            if abs(vx) < 1e-9 and abs(vy) < 1e-9:
+                return nx, ny
+            # Rectangle intersection from node center toward target
+            dx = vx; dy = vy
+            w2 = node_w / 2.0; h2 = node_h / 2.0
+            t_vals = []
+            if abs(dx) > 1e-9:
+                t_vals.append(( w2 - 0.0) / dx)
+                t_vals.append((-w2 - 0.0) / dx)
+            if abs(dy) > 1e-9:
+                t_vals.append(( h2 - 0.0) / dy)
+                t_vals.append((-h2 - 0.0) / dy)
+            candidates = []
+            for t in t_vals:
+                if t <= 0: continue
+                px = nx + dx * t; py = ny + dy * t
+                if abs(px - nx) <= w2 + 1e-6 and abs(py - ny) <= h2 + 1e-6:
+                    candidates.append((px, py, t))
+            if not candidates:
+                return nx, ny
+            candidates.sort(key=lambda p: p[2])
+            return candidates[0][0], candidates[0][1]
+
+        # Connections to nodes
+        def _stroke_to(node_obj, from_center):
+            # Compute anchors on node and box according to anchor setting/direction
+            box_ax, box_ay = _box_anchor_world(edge, float(node_obj.x), float(node_obj.y))
+            node_ax, node_ay = _node_anchor_world(node_obj, box_ax, box_ay)
+            sx, sy = (node_ax, node_ay) if from_center else (box_ax, box_ay)
+            ex, ey = (box_ax, box_ay) if from_center else (node_ax, node_ay)
+            # Draw the segment honoring edge rendering type using screen-space helper
+            s1 = graph_canvas.world_to_screen(sx, sy)
+            s2 = graph_canvas.world_to_screen(ex, ey)
+            popped = False
+            try:
+                gc.PopState()
+                popped = True
+            except Exception:
+                popped = False
+            try:
+                # Use per-segment control points if present for this node
+                seg_cp = []
+                try:
+                    if hasattr(edge, 'metadata') and isinstance(edge.metadata, dict):
+                        cp_map = edge.metadata.get('segment_cp_nodes', {}) or {}
+                        seg_cp = cp_map.get(str(node_obj.id), []) or []
+                except Exception:
+                    seg_cp = []
+                original_cp = getattr(edge, 'control_points', None)
+                if seg_cp:
+                    edge.control_points = seg_cp
+                draw_edge_by_type(graph_canvas, dc, (int(s1[0]), int(s1[1])), (int(s2[0]), int(s2[1])), edge)
+            finally:
+                if popped:
+                    try:
+                        size = graph_canvas.GetSize()
+                        center_x = size.width / 2.0
+                        center_y = size.height / 2.0
+                        gc.PushState()
+                        gc.Translate(center_x + graph_canvas.pan_x, center_y + graph_canvas.pan_y)
+                        if getattr(graph_canvas, 'world_rotation', 0.0) != 0.0:
+                            gc.Rotate(math.radians(graph_canvas.world_rotation))
+                        gc.Scale(graph_canvas.zoom, graph_canvas.zoom)
+                    except Exception:
+                        pass
+                # Restore edge control points
+                try:
+                    edge.control_points = original_cp
+                except Exception:
+                    pass
+            # Arrow/dot position t from metadata (default 0.5)
+            t_val = 0.5
+            try:
+                if hasattr(edge, 'metadata') and isinstance(edge.metadata, dict):
+                    tmap = edge.metadata.get('arrow_pos_nodes', {}) or {}
+                    t_val = float(tmap.get(str(node_obj.id), 0.5))
+            except Exception:
+                t_val = 0.5
+            t_val = max(0.0, min(1.0, t_val))
+            ax = sx + (ex - sx) * t_val
+            ay = sy + (ey - sy) * t_val
+            if getattr(edge, 'directed', True):
+                _draw_world_arrow(sx, sy, ax, ay, color, max(1, int(edge.width * graph_canvas.zoom)))
+            # Yellow control dot
+            try:
+                gc.SetBrush(wx.Brush(wx.Colour(255, 255, 0)))
+                gc.SetPen(wx.Pen(wx.Colour(0, 0, 0), 1))
+                r = max(3.0, float(edge.width))
+                gc.DrawEllipse(ax - r, ay - r, r * 2.0, r * 2.0)
+            except Exception:
+                pass
+
+        if edge.source_id:
+            n = graph_canvas.graph.get_node(edge.source_id)
+            if n:
+                _stroke_to(n, True)
+        for nid in edge.source_ids:
+            n = graph_canvas.graph.get_node(nid)
+            if n:
+                _stroke_to(n, True)
+
+        if edge.target_id:
+            n = graph_canvas.graph.get_node(edge.target_id)
+            if n:
+                _stroke_to(n, False)
+        for nid in edge.target_ids:
+            n = graph_canvas.graph.get_node(nid)
+            if n:
+                _stroke_to(n, False)
+    else:
+        # Fallback to prior screen-space implementation if GC unavailable
+        screen_x = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
+        width = int(edge.uber_width * graph_canvas.zoom)
+        height = int(edge.uber_height * graph_canvas.zoom)
+        if edge.selected:
+            dc.SetBrush(wx.Brush(wx.Colour(255, 255, 0)))
+        else:
+            alpha = 128
+            fill_color = wx.Colour(color.Red(), color.Green(), color.Blue(), alpha)
+            dc.SetBrush(wx.Brush(fill_color))
+        dc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom))))
+        if edge.uber_shape == "rectangle":
+            dc.DrawRectangle(screen_x[0] - width//2, screen_x[1] - height//2, width, height)
+        else:
+            dc.DrawEllipse(screen_x[0] - width//2, screen_x[1] - height//2, width, height)
     
-    # Draw lines to target nodes
-    if edge.target_id:
-        target_node = graph_canvas.graph.get_node(edge.target_id)
-        if target_node:
-            target_screen = graph_canvas.world_to_screen(target_node.x, target_node.y)
-            screen_x = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
-            path = gc.CreatePath()
-            path.MoveToPoint(screen_x[0], screen_x[1])
-            path.AddLineToPoint(target_screen[0], target_screen[1])
-            gc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom))))
-            gc.StrokePath(path)
-    
-    for node_id in edge.target_ids:
-        node = graph_canvas.graph.get_node(node_id)
-        if node:
-            node_screen = graph_canvas.world_to_screen(node.x, node.y)
-            screen_x = graph_canvas.world_to_screen(edge.uber_x, edge.uber_y)
-            path = gc.CreatePath()
-            path.MoveToPoint(screen_x[0], screen_x[1])
-            path.AddLineToPoint(node_screen[0], node_screen[1])
-            gc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom))))
-            gc.StrokePath(path)
+        # Draw node↔uberedge connections honoring anchor settings (screen space)
+        def _rect_anchor_screen(cx, cy, w, h, tx, ty):
+            w2 = w / 2.0; h2 = h / 2.0
+            vx = tx - cx; vy = ty - cy
+            if abs(vx) < 1e-9 and abs(vy) < 1e-9:
+                return cx, cy
+            t_vals = []
+            if abs(vx) > 1e-9:
+                t_vals.append(( w2) / vx)
+                t_vals.append((-w2) / vx)
+            if abs(vy) > 1e-9:
+                t_vals.append(( h2) / vy)
+                t_vals.append((-h2) / vy)
+            candidates = []
+            for t in t_vals:
+                if t <= 0: continue
+                px = cx + vx * t; py = cy + vy * t
+                if abs(px - cx) <= w2 + 1e-6 and abs(py - cy) <= h2 + 1e-6:
+                    candidates.append((px, py, t))
+            if not candidates:
+                return cx, cy
+            candidates.sort(key=lambda p: p[2])
+            return candidates[0][0], candidates[0][1]
+
+        box_cx, box_cy = float(screen_x[0]), float(screen_x[1])
+        box_w, box_h = float(width), float(height)
+
+        def _stroke_screen_to(node_obj, as_source):
+            ns = graph_canvas.world_to_screen(node_obj.x, node_obj.y)
+            node_w = int(node_obj.width * graph_canvas.zoom)
+            node_h = int(node_obj.height * graph_canvas.zoom)
+            # Node anchor toward box
+            nax, nay = _rect_anchor_screen(float(ns[0]), float(ns[1]), float(node_w), float(node_h), box_cx, box_cy)
+            # Box anchor toward node
+            bax, bay = _rect_anchor_screen(box_cx, box_cy, box_w, box_h, float(ns[0]), float(ns[1]))
+            dc.DrawLine(int(nax), int(nay), int(bax), int(bay))
+            if edge.selected:
+                dc.DrawCircle(int(nax), int(nay), max(6, int(4 * graph_canvas.zoom)))
+                dc.DrawCircle(int(bax), int(bay), max(6, int(4 * graph_canvas.zoom)))
+
+        if edge.source_id:
+            n = graph_canvas.graph.get_node(edge.source_id)
+            if n:
+                _stroke_screen_to(n, True)
+        for nid in edge.source_ids:
+            n = graph_canvas.graph.get_node(nid)
+            if n:
+                _stroke_screen_to(n, True)
+        if edge.target_id:
+            n = graph_canvas.graph.get_node(edge.target_id)
+            if n:
+                _stroke_screen_to(n, False)
+        for nid in edge.target_ids:
+            n = graph_canvas.graph.get_node(nid)
+            if n:
+                _stroke_screen_to(n, False)
 
 
 def draw_radial_hyperedge(graph_canvas: "m_graph_canvas.GraphCanvas", dc, edge, color):
@@ -3117,32 +3601,32 @@ def draw_edge_segment(graph_canvas: "m_graph_canvas.GraphCanvas", dc, source_pos
     if edge.is_hyperedge:
         if edge.hyperedge_visualization == "curved_surface":
             # Draw curved surface between nodes
-            graph_canvas.draw_curved_surface(dc, source_pos, target_pos, edge, color)
+            draw_curved_surface(graph_canvas, dc, source_pos, target_pos, edge, color)
             return
         elif edge.hyperedge_visualization == "blob_boundary":
             # Draw blob-like boundary around nodes
-            graph_canvas.draw_blob_boundary(dc, edge, color)
+            draw_blob_boundary(graph_canvas, dc, edge, color)
             return
         elif edge.hyperedge_visualization == "polygon":
             # Draw polygon-based visualization
-            graph_canvas.draw_polygon_hyperedge(dc, edge, color)
+            draw_polygon_hyperedge(graph_canvas, dc, edge, color)
             return
         elif edge.hyperedge_visualization == "zykov":
             # Draw Zykov visualization
-            graph_canvas.draw_zykov_hyperedge(dc, edge, color)
+            draw_zykov_hyperedge(graph_canvas, dc, edge, color)
             return
         elif edge.hyperedge_visualization == "radial":
             # Draw radial layout visualization
-            graph_canvas.draw_radial_hyperedge(dc, edge, color)
+            draw_radial_hyperedge(graph_canvas, dc, edge, color)
             return
         elif edge.hyperedge_visualization == "ubergraph":
             # Draw edge as a node with connections
             if edge.hyperedge_view == "line_graph":
-                graph_canvas.draw_line_graph_hyperedge(dc, edge, color)
+                draw_line_graph_hyperedge(graph_canvas, dc, edge, color)
             elif edge.hyperedge_view == "derivative_graph":
-                graph_canvas.draw_derivative_graph_hyperedge(dc, edge, color)
+                draw_derivative_graph_hyperedge(graph_canvas, dc, edge, color)
             else:  # standard view
-                graph_canvas.draw_ubergraph_hyperedge(dc, edge, color)
+                draw_ubergraph_hyperedge(graph_canvas, dc, edge, color)
             return
         
     # Set line style
@@ -3153,15 +3637,28 @@ def draw_edge_segment(graph_canvas: "m_graph_canvas.GraphCanvas", dc, source_pos
     else:
         pen_style = wx.PENSTYLE_SOLID
         
-    dc.SetPen(wx.Pen(color, max(1, int(edge.width * graph_canvas.zoom)), pen_style))
+    # Resolve pen color: explicit override > edge.color > default color param > black
+    try:
+        if pen_color is not None:
+            c = pen_color
+        elif hasattr(edge, 'color') and edge.color is not None:
+            c = wx.Colour(edge.color[0], edge.color[1], edge.color[2])
+        else:
+            c = color if isinstance(color, wx.Colour) else wx.Colour(0, 0, 0)
+    except Exception:
+        c = wx.Colour(0, 0, 0)
+    dc.SetPen(wx.Pen(c, max(1, int(edge.width * graph_canvas.zoom)), pen_style))
     
     # Draw the line
     dc.DrawLine(int(source_pos[0]), int(source_pos[1]),
                 int(target_pos[0]), int(target_pos[1]))
 
    
-def draw_edge_by_type(graph_canvas: "m_graph_canvas.GraphCanvas", dc, source_pos, target_pos, edge):
-    """Draw edge based on the selected rendering type."""
+def draw_edge_by_type(graph_canvas: "m_graph_canvas.GraphCanvas", dc, source_pos, target_pos, edge, pen_color=None):
+    """Draw edge based on the selected rendering type.
+    pen_color allows callers to enforce a specific pen color (e.g., for blended links)
+    while keeping thickness logic consistent.
+    """
 
     # Check for composite curve first
     if edge and getattr(edge, 'is_composite', False) and getattr(edge, 'curve_segments', None):

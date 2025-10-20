@@ -14,7 +14,12 @@ class NodePropertiesDialog(wx.Dialog):
     """Dialog for editing node properties."""
 
     def __init__(self, parent, node: m_node.Node):
-        super().__init__(parent, title="Node Properties", size=(400, 500))
+        super().__init__(
+            parent,
+            title="Node Properties",
+            size=(400, 500),
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
+        )
 
         self.node = node
         self.setup_ui()
@@ -24,7 +29,8 @@ class NodePropertiesDialog(wx.Dialog):
 
         # Create scrolled panel for the main content
         panel = wx.ScrolledWindow(self, style=wx.VSCROLL)
-        panel.SetScrollbars(0, 20, 0, 0)  # Only vertical scrolling, 20 pixels per unit
+        # Use SetScrollRate to avoid relayout-induced control resizing on macOS
+        panel.SetScrollRate(0, 20)
         sizer = wx.BoxSizer(wx.VERTICAL)
 
         # Basic properties
@@ -40,6 +46,7 @@ class NodePropertiesDialog(wx.Dialog):
 
         # Position
         pos_sizer = wx.FlexGridSizer(3, 2, 5, 5)
+        pos_sizer.AddGrowableCol(1)
         pos_sizer.Add(wx.StaticText(panel, label="X:"), 0,
                       wx.ALIGN_CENTER_VERTICAL)
         self.x_ctrl = wx.SpinCtrlDouble(panel,
@@ -69,6 +76,18 @@ class NodePropertiesDialog(wx.Dialog):
 
         basic_sizer.Add(pos_sizer, 0, wx.EXPAND | wx.ALL, 5)
 
+        # Node type selection
+        type_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        type_sizer.Add(wx.StaticText(panel, label="Node Type:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        self.node_type_choice = wx.Choice(panel, choices=[
+            "standard_node",
+            "uber_node"
+        ])
+        # Default selection
+        self.node_type_choice.SetSelection(1 if getattr(self.node, 'metadata', {}).get('node_type') == 'uber_node' else 0)
+        type_sizer.Add(self.node_type_choice, 1, wx.EXPAND | wx.ALL, 5)
+        basic_sizer.Add(type_sizer, 0, wx.EXPAND | wx.ALL, 5)
+
         sizer.Add(basic_sizer, 0, wx.EXPAND | wx.ALL, 5)
 
         # Visual properties
@@ -77,6 +96,7 @@ class NodePropertiesDialog(wx.Dialog):
 
         # Size
         size_sizer = wx.FlexGridSizer(2, 2, 5, 5)
+        size_sizer.AddGrowableCol(1)
         size_sizer.Add(wx.StaticText(panel, label="Width:"), 0,
                        wx.ALIGN_CENTER_VERTICAL)
         self.width_ctrl = wx.SpinCtrl(panel,
@@ -97,6 +117,7 @@ class NodePropertiesDialog(wx.Dialog):
 
         # Colors
         color_sizer = wx.FlexGridSizer(3, 2, 5, 5)
+        color_sizer.AddGrowableCol(1)
 
         color_sizer.Add(wx.StaticText(panel, label="Fill Color:"), 0,
                         wx.ALIGN_CENTER_VERTICAL)
@@ -125,6 +146,7 @@ class NodePropertiesDialog(wx.Dialog):
 
         # Font and border
         font_sizer = wx.FlexGridSizer(2, 2, 5, 5)
+        font_sizer.AddGrowableCol(1)
         font_sizer.Add(wx.StaticText(panel, label="Font Size:"), 0,
                        wx.ALIGN_CENTER_VERTICAL)
         self.font_size_ctrl = wx.SpinCtrl(panel,
@@ -295,6 +317,15 @@ class NodePropertiesDialog(wx.Dialog):
         self.node.border_color = self.border_color_btn.GetBackgroundColour(
         ).Get()[:3]
 
+        # Save node type
+        try:
+            if self.node_type_choice.GetSelection() == 1:
+                self.node.metadata['node_type'] = 'uber_node'
+            else:
+                self.node.metadata['node_type'] = 'standard_node'
+        except Exception:
+            pass
+
         self.EndModal(wx.ID_OK)
 
 
@@ -302,7 +333,12 @@ class EdgePropertiesDialog(wx.Dialog):
     """Dialog for editing edge properties."""
 
     def __init__(self, parent, edge: m_edge.Edge):
-        super().__init__(parent, title="Edge Properties", size=(400, 450))
+        super().__init__(
+            parent,
+            title="Edge Properties",
+            size=(400, 450),
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
+        )
 
         self.edge = edge
         self.setup_ui()
@@ -312,7 +348,7 @@ class EdgePropertiesDialog(wx.Dialog):
 
         # Create scrolled panel for the main content
         panel = wx.ScrolledWindow(self, style=wx.VSCROLL)
-        panel.SetScrollbars(0, 20, 0, 0)  # Only vertical scrolling, 20 pixels per unit
+        panel.SetScrollRate(0, 20)
         sizer = wx.BoxSizer(wx.VERTICAL)
 
         # Basic properties
@@ -362,6 +398,24 @@ class EdgePropertiesDialog(wx.Dialog):
         target_btn_sizer.Add(remove_target_btn, 0, wx.ALL, 5)
         basic_sizer.Add(target_btn_sizer, 0, wx.EXPAND)
 
+        # Edge type selection
+        type_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        type_sizer.Add(wx.StaticText(panel, label="Edge Type:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        self.edge_type_choice = wx.Choice(panel, choices=[
+            "standard_edge",
+            "hyperedge",
+            "uberedge"
+        ])
+        # Default selection based on flags
+        if getattr(self.edge, 'is_hyperedge', False) and getattr(self.edge, 'hyperedge_visualization', 'lines') == 'ubergraph':
+            self.edge_type_choice.SetSelection(2)
+        elif getattr(self.edge, 'is_hyperedge', False):
+            self.edge_type_choice.SetSelection(1)
+        else:
+            self.edge_type_choice.SetSelection(0)
+        type_sizer.Add(self.edge_type_choice, 1, wx.EXPAND | wx.ALL, 5)
+        basic_sizer.Add(type_sizer, 0, wx.EXPAND | wx.ALL, 5)
+
         sizer.Add(basic_sizer, 0, wx.EXPAND | wx.ALL, 5)
 
         # Hyperedge properties
@@ -370,19 +424,20 @@ class EdgePropertiesDialog(wx.Dialog):
         
         # Connection points
         connection_sizer = wx.FlexGridSizer(2, 2, 5, 5)
+        connection_sizer.AddGrowableCol(1)
         
         connection_sizer.Add(wx.StaticText(panel, label="From Connection Point:"), 0,
                      wx.ALIGN_CENTER_VERTICAL)
         self.from_connection_slider = wx.Slider(panel, value=int(self.edge.from_connection_point * 100),
                                               minValue=0, maxValue=100,
-                                              style=wx.SL_HORIZONTAL | wx.SL_LABELS)
+                                              style=wx.SL_HORIZONTAL)
         connection_sizer.Add(self.from_connection_slider, 1, wx.EXPAND)
         
         connection_sizer.Add(wx.StaticText(panel, label="To Connection Point:"), 0,
                      wx.ALIGN_CENTER_VERTICAL)
         self.to_connection_slider = wx.Slider(panel, value=int(self.edge.to_connection_point * 100),
                                             minValue=0, maxValue=100,
-                                            style=wx.SL_HORIZONTAL | wx.SL_LABELS)
+                                            style=wx.SL_HORIZONTAL)
         connection_sizer.Add(self.to_connection_slider, 1, wx.EXPAND)
         
         hyperedge_sizer.Add(connection_sizer, 0, wx.EXPAND | wx.ALL, 5)
@@ -413,7 +468,7 @@ class EdgePropertiesDialog(wx.Dialog):
         arrow_sizer.Add(wx.StaticText(panel, label="Arrow Position:"), 0, wx.ALL, 5)
         self.arrow_position_slider = wx.Slider(panel, value=int(self.edge.arrow_position * 100),
                                              minValue=0, maxValue=100,
-                                             style=wx.SL_HORIZONTAL | wx.SL_LABELS)
+                                             style=wx.SL_HORIZONTAL)
         arrow_sizer.Add(self.arrow_position_slider, 0, wx.EXPAND | wx.ALL, 5)
         
         # Arrow options for hyperedges
@@ -470,7 +525,15 @@ class EdgePropertiesDialog(wx.Dialog):
                 }
                 self.edge.hyperedge_visualization = viz_map_reverse.get(self.viz_choice.GetSelection(), "lines")
                 # Force a refresh of the canvas
-                wx.CallAfter(self.GetParent().canvas.Refresh)
+                try:
+                    parent = self.GetParent()
+                    # Parent is GraphCanvas in context-menu flow; main window in sidebar flow
+                    if hasattr(parent, 'Refresh'):
+                        wx.CallAfter(parent.Refresh)
+                    elif hasattr(parent, 'canvas') and hasattr(parent.canvas, 'Refresh'):
+                        wx.CallAfter(parent.canvas.Refresh)
+                except Exception:
+                    pass
             
             self.viz_choice.Bind(wx.EVT_CHOICE, on_viz_change)
             viz_sizer.Add(self.viz_choice, 0, wx.EXPAND | wx.ALL, 5)
@@ -496,7 +559,14 @@ class EdgePropertiesDialog(wx.Dialog):
                     2: "derivative_graph"
                 }
                 self.edge.hyperedge_view = view_map_reverse.get(self.view_choice.GetSelection(), "standard")
-                wx.CallAfter(self.GetParent().canvas.Refresh)
+                try:
+                    parent = self.GetParent()
+                    if hasattr(parent, 'Refresh'):
+                        wx.CallAfter(parent.Refresh)
+                    elif hasattr(parent, 'canvas') and hasattr(parent.canvas, 'Refresh'):
+                        wx.CallAfter(parent.canvas.Refresh)
+                except Exception:
+                    pass
             
             self.view_choice.Bind(wx.EVT_CHOICE, on_view_change)
             viz_sizer.Add(wx.StaticText(panel, label="Hyperedge View:"), 0, wx.ALL, 5)
@@ -776,7 +846,14 @@ class EdgePropertiesDialog(wx.Dialog):
             }
             self.edge.hyperedge_visualization = viz_map.get(self.viz_choice.GetSelection(), "lines")
             # Force a refresh of the canvas
-            wx.CallAfter(self.GetParent().canvas.Refresh)
+            try:
+                parent = self.GetParent()
+                if hasattr(parent, 'Refresh'):
+                    wx.CallAfter(parent.Refresh)
+                elif hasattr(parent, 'canvas') and hasattr(parent.canvas, 'Refresh'):
+                    wx.CallAfter(parent.canvas.Refresh)
+            except Exception:
+                pass
         
         # Update source and target node lists
         source_ids = []
@@ -791,8 +868,26 @@ class EdgePropertiesDialog(wx.Dialog):
         self.edge.target_ids = target_ids
         self.edge.target_id = target_ids[0] if target_ids else None
         
-        # Update hyperedge state
-        self.edge.is_hyperedge = len(source_ids) > 1 or len(target_ids) > 1
+        # Update hyperedge/uberedge type from chooser
+        try:
+            sel = self.edge_type_choice.GetSelection()
+            if sel == 2:  # uberedge
+                self.edge.is_hyperedge = True
+                self.edge.hyperedge_visualization = 'ubergraph'
+                if not getattr(self.edge, 'hyperedge_view', None):
+                    self.edge.hyperedge_view = 'standard'
+            elif sel == 1:  # hyperedge
+                self.edge.is_hyperedge = True
+                if getattr(self.edge, 'hyperedge_visualization', None) == 'ubergraph':
+                    self.edge.hyperedge_visualization = 'lines'
+            else:  # standard
+                # keep hyperedge only if multiple endpoints exist
+                self.edge.is_hyperedge = len(source_ids) > 1 or len(target_ids) > 1
+                if not self.edge.is_hyperedge:
+                    self.edge.hyperedge_visualization = 'lines'
+        except Exception:
+            # Fallback to structure-based
+            self.edge.is_hyperedge = len(source_ids) > 1 or len(target_ids) > 1
 
         # Apply colors
         self.edge.color = self.line_color_btn.GetBackgroundColour().Get()[:3]
@@ -806,7 +901,12 @@ class GraphPropertiesDialog(wx.Dialog):
     """Dialog for editing graph properties."""
 
     def __init__(self, parent, graph: m_graph.Graph):
-        super().__init__(parent, title="Graph Properties", size=(400, 400))
+        super().__init__(
+            parent,
+            title="Graph Properties",
+            size=(400, 400),
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
+        )
 
         self.graph = graph
         self.setup_ui()

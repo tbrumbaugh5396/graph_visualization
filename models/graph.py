@@ -65,11 +65,22 @@ class Graph:
             print(f"DEBUG: Node {node_id} not found in graph")
             return False
 
-        # Remove all edges connected to this node
+        # Remove all edges connected via source/target and sanitize hyperedge lists
         edges_to_remove = []
         for edge_id, edge in self.edges.items():
+            # Mark edges that directly reference this node via source/target
             if edge.source_id == node_id or edge.target_id == node_id:
                 edges_to_remove.append(edge_id)
+            # Clean up hyperedge multi-endpoint lists if present
+            try:
+                if hasattr(edge, 'source_ids') and isinstance(edge.source_ids, list):
+                    if node_id in edge.source_ids:
+                        edge.source_ids = [nid for nid in edge.source_ids if nid != node_id]
+                if hasattr(edge, 'target_ids') and isinstance(edge.target_ids, list):
+                    if node_id in edge.target_ids:
+                        edge.target_ids = [nid for nid in edge.target_ids if nid != node_id]
+            except Exception:
+                pass
 
         for edge_id in edges_to_remove:
             self.remove_edge(edge_id)
@@ -109,6 +120,28 @@ class Graph:
 
         if edge_id not in self.edges:
             return False
+
+        # Remove references to this uberedge from other edges (e.g., connected_uberedges and arrow maps)
+        for other in list(self.edges.values()):
+            try:
+                # Remove from explicit uberedge links
+                if hasattr(other, 'metadata') and isinstance(other.metadata, dict):
+                    lst = other.metadata.get('connected_uberedges')
+                    if isinstance(lst, list) and edge_id in lst:
+                        other.metadata['connected_uberedges'] = [eid for eid in lst if eid != edge_id]
+                    amap = other.metadata.get('arrow_pos_edges')
+                    if isinstance(amap, dict) and edge_id in amap:
+                        try:
+                            # keys may be strings
+                            if edge_id in amap:
+                                del amap[edge_id]
+                            elif str(edge_id) in amap:
+                                del amap[str(edge_id)]
+                            other.metadata['arrow_pos_edges'] = amap
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
         del self.edges[edge_id]
         self.selected_edges.discard(edge_id)

@@ -150,7 +150,7 @@ def on_default_node_properties(main_window: "m_main_window.MainWindow", event):
     default_node = Node(0, 0, "Default Node")
 
     # Open properties dialog
-    from .dialogs import NodePropertiesDialog
+    from gui.dialogs import NodePropertiesDialog
     dialog = NodePropertiesDialog(main_window, default_node)
     main_window.apply_theme_to_dialog(dialog)
     if dialog.ShowModal() == wx.ID_OK:
@@ -168,7 +168,7 @@ def on_default_edge_properties(main_window: "m_main_window.MainWindow", event):
     default_edge = Edge("temp_source", "temp_target", "Default Edge")
 
     # Open properties dialog
-    from .dialogs import EdgePropertiesDialog
+    from gui.dialogs import EdgePropertiesDialog
     dialog = EdgePropertiesDialog(main_window, default_edge)
     main_window.apply_theme_to_dialog(dialog)
     if dialog.ShowModal() == wx.ID_OK:

@@ -732,6 +732,14 @@ class MainWindow(wx.Frame):
             _cp_panel.update_composite_list(self)
         except Exception:
             pass
+
+    def apply_theme_to_dialog(self, dialog: wx.Dialog):
+        """Apply current theme to a dialog if ThemeManager is available."""
+        try:
+            if getattr(self.managers, 'theme_manager', None):
+                self.managers.theme_manager.apply_theme_to_window(dialog)
+        except Exception:
+            pass
     
 
     def zoom_to_fit(self):

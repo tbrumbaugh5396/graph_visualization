@@ -353,6 +353,53 @@ def on_graph_type_changed(main_window: "m_main_window.MainWindow", event):
     if hasattr(main_window, 'canvas'):
         main_window.canvas.selected_graph_type = main_window.meta_graph_information.selected_graph_type
 
+    # Convert existing items based on selected graph type
+    try:
+        sel = main_window.meta_graph_information.selected_graph_type
+        # 6: Ubergraph, 7: Typed Ubergraph
+        if sel in (6, 7):
+            # Convert all edges to uberedges (hyperedges with ubergraph visualization)
+            for edge in main_window.current_graph.get_all_edges():
+                # Ensure hyperedge flags and lists
+                if getattr(edge, 'source_id', None) and edge.source_id not in edge.source_ids:
+                    edge.source_ids.append(edge.source_id)
+                if getattr(edge, 'target_id', None) and edge.target_id not in edge.target_ids:
+                    edge.target_ids.append(edge.target_id)
+                edge.is_hyperedge = True
+                edge.hyperedge_visualization = "ubergraph"
+                # Default to line_graph view so uberedges connect edge-to-edge
+                edge.hyperedge_view = "line_graph"
+                # Seed uber position at midpoint
+                try:
+                    src = main_window.current_graph.get_node(edge.source_id)
+                    tgt = main_window.current_graph.get_node(edge.target_id)
+                    if src and tgt:
+                        edge.uber_x = (src.x + tgt.x) / 2.0
+                        edge.uber_y = (src.y + tgt.y) / 2.0
+                except Exception:
+                    pass
+        elif sel == 4:  # Hypergraph
+            for edge in main_window.current_graph.get_all_edges():
+                # Keep as hyperedge but default to line visualization
+                if getattr(edge, 'source_id', None) and edge.source_id not in edge.source_ids:
+                    edge.source_ids.append(edge.source_id)
+                if getattr(edge, 'target_id', None) and edge.target_id not in edge.target_ids:
+                    edge.target_ids.append(edge.target_id)
+                edge.is_hyperedge = True
+                edge.hyperedge_visualization = "lines"
+        else:
+            # For normal graph types, revert to standard edges
+            for edge in main_window.current_graph.get_all_edges():
+                edge.hyperedge_visualization = "lines"
+                # Keep is_hyperedge only if multiple endpoints remain
+                if len(getattr(edge, 'source_ids', []) or []) <= 1 and len(getattr(edge, 'target_ids', []) or []) <= 1:
+                    edge.is_hyperedge = False
+        # Refresh view
+        if hasattr(main_window, 'canvas'):
+            main_window.canvas.Refresh()
+    except Exception as e:
+        print(f"DEBUG: Graph type conversion error: {e}")
+
 
 def on_checkboard_background_toggle(main_window: "m_main_window.MainWindow", event):
     """Handle checkboard background toggle."""
